@@ -80,7 +80,7 @@ const lambdaStack = new LambdaFunctionsStack(app, 'PowerPlantLambdaFunctionsStac
     description: 'powerplant: Poller, Dashboard API, Alert, and Report Lambdas + EventBridge + API Gateway'
 });
 
-lambdaStack.addDependency(infraStack);
+lambdaStack.addStackDependency(infraStack);
 
 // ─── Tags ─────────────────────────────────────────────────────────────────────
 

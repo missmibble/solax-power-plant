@@ -2,19 +2,14 @@
 
 /**
  * SolaX Cloud OpenAPI client — covers Authentication, Information Management,
- * and Monitoring Management only (solax-apis.md §1, §2, §4).
+ * and Monitoring Management only (docs/solax-apis.md §1, §2, §4).
  *
  * Deliberately excludes every control/write endpoint (EMS work mode & power
  * controls, export/import limits, inverter work mode control, battery heating,
  * VPP remote control, EV charger control, A1-Hybrid-G2 work mode) — this app
  * only monitors and recommends, it doesn't change device behaviour. Add those
- * later, from solax-apis.md §3 and §6-11, if the app needs to apply its own
- * recommendations automatically.
- *
- * solax-apis.md is truncated mid-§11 and never includes Appendices 1-8 (device
- * type/model codes, flag/status/alarm codes), so DEVICE_TYPE below only
- * contains the values confirmable from the doc's own worked examples —
- * anything else must be confirmed against the full portal reference first.
+ * later, from docs/solax-apis.md §3 and §6-11, if the app needs to apply its
+ * own recommendations automatically.
  */
 
 const BASE_URLS = {
@@ -27,10 +22,50 @@ const BUSINESS_TYPE = {
     COMMERCIAL_INDUSTRIAL: 4
 };
 
+// docs/solax-apis.md Appendix 3
 const DEVICE_TYPE = {
-    INVERTER: 1, // confirmed via solax-application-creds.txt's worked page_device_info example
-    EMS: 100 // stated directly in solax-apis.md's EMS System Functions request bodies
-    // BATTERY / METER / EV_CHARGER codes are in Appendix 3, not present in solax-apis.md.
+    INVERTER: 1,
+    BATTERY: 2,
+    METER: 3,
+    EV_CHARGER: 4,
+    EMS: 100
+};
+
+// docs/solax-apis.md Appendix 6 — only the fault-relevant/common states are named
+// here; the full list (TOU/VPP sub-states etc.) is in the doc if ever needed.
+const DEVICE_STATUS = {
+    INVERTER: {
+        WAITING: 100,
+        SELF_CHECK: 101,
+        NORMAL: 102,
+        FAULT_RECOVERABLE: 103,
+        FAULT_PERMANENT: 104,
+        UPDATE_MODE: 105,
+        EPS_CHECK_MODE: 106,
+        EPS_MODE: 107,
+        SELF_TEST: 108,
+        IDLE_MODE: 109,
+        STANDBY: 110
+    },
+    // Residential batteries only report Idle/Work — the fuller Charging/
+    // Discharging/Fault state machine in Appendix 6 is C&I-only.
+    BATTERY_RESIDENTIAL: { IDLE: 0, WORK: 1 },
+    EV_CHARGER: {
+        AVAILABLE: 0,
+        PREPARING: 1,
+        CHARGING: 2,
+        FINISH: 3,
+        FAULTED: 4,
+        UNAVAILABLE: 5,
+        RESERVED: 6,
+        SUSPENDED_EV: 7,
+        SUSPENDED_EVSE: 8,
+        UPDATE: 9,
+        CARD_ACTIVATION: 10,
+        START_DELAY: 11,
+        CHARGE_PAUSE: 12,
+        STOPPING: 13
+    }
 };
 
 let cachedToken = null; // { accessToken, expiresAt } — reused across warm Lambda invocations
@@ -157,6 +192,7 @@ module.exports = {
     BASE_URLS,
     BUSINESS_TYPE,
     DEVICE_TYPE,
+    DEVICE_STATUS,
     getAccessToken,
     getPlantInfo,
     getDeviceInfo,

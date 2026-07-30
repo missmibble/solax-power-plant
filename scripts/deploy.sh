@@ -1,14 +1,30 @@
 #!/bin/bash
 # deploy.sh — Deploy PowerPlant stacks to AWS
 # Usage: bash scripts/deploy.sh [ENV]
+#        bash scripts/deploy.sh --config <file>   (e.g. a gitignored local config)
 
 set -e
 
-ENV=${1:-dev}
-CONFIG_FILE="${ENV}-powerplant.json"
+ENV="dev"
+CONFIG_FILE=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -c|--config)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        *)
+            ENV="$1"
+            shift
+            ;;
+    esac
+done
+
+CONFIG_FILE="${CONFIG_FILE:-${ENV}-powerplant.json}"
 
 echo "================================================"
-echo "  Deploying PowerPlant  [env: $ENV]"
+echo "  Deploying PowerPlant  [config: $CONFIG_FILE]"
 echo "================================================"
 
 if [ ! -f "config/$CONFIG_FILE" ]; then

@@ -9,6 +9,7 @@ const {
     BUSINESS_TYPE,
     DEVICE_TYPE,
     getAccessToken,
+    getDeviceInfo,
     getDeviceRealtimeData
 } = require('powerplant-shared');
 
@@ -16,6 +17,7 @@ const ssmClient = new SSMClient({ region: process.env.AWS_REGION });
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
 
 let cachedCredentials = null; // reused across warm invocations in the same execution context
+let cachedBatterySn = null; // discovered once per execution context if not configured
 
 async function loadSolaxCredentials() {
     if (cachedCredentials) return cachedCredentials;
@@ -39,54 +41,116 @@ async function loadSolaxCredentials() {
     return cachedCredentials;
 }
 
-// TODO: this only covers the Inverter device (DEVICE_TYPE.INVERTER / snList = SOLAX_INVERTER_SN),
-// which per solax-apis.md §4.4 doesn't include battery SOC/charge-discharge fields — those come
-// from a separate Battery device with its own deviceSn and deviceType. solax-apis.md never
-// includes Appendix 3, so the Battery deviceType code is unconfirmed; add a second
-// getDeviceRealtimeData call once that's known and the battery's deviceSn is on hand
-// (solax.getDeviceInfo with deviceType filtered can discover it).
+// The battery's deviceSn isn't necessarily known up front — if SOLAX_BATTERY_SN
+// isn't configured (or still the config template's placeholder), discover it via
+// getDeviceInfo (deviceType=BATTERY) instead of requiring the user to find it manually.
+async function resolveBatterySn(baseUrl, accessToken, businessType) {
+    const configured = process.env.SOLAX_BATTERY_SN;
+    if (configured && !configured.startsWith('TODO_')) return configured;
+    if (cachedBatterySn) return cachedBatterySn;
+
+    const devices = await getDeviceInfo(baseUrl, accessToken, {
+        deviceType: DEVICE_TYPE.BATTERY,
+        businessType
+    });
+
+    const battery = (devices?.records || devices || [])[0];
+    if (!battery?.deviceSn) {
+        logError('No battery device discovered — this reading will have no battery fields');
+        return null;
+    }
+
+    cachedBatterySn = battery.deviceSn;
+    logInfo('Discovered battery device', { deviceSn: cachedBatterySn });
+    return cachedBatterySn;
+}
+
+// Battery data is a bonus on top of the required inverter reading — a failure
+// here (no battery configured/discoverable, transient API error) never fails
+// the whole poll, it just means this interval's reading has no battery fields.
+async function fetchBatteryReading(baseUrl, accessToken, businessType) {
+    try {
+        const batterySn = await resolveBatterySn(baseUrl, accessToken, businessType);
+        if (!batterySn) return null;
+
+        const [reading] = await getDeviceRealtimeData(baseUrl, accessToken, {
+            snList: batterySn,
+            deviceType: DEVICE_TYPE.BATTERY,
+            requestSnType: 2, // querying by the battery's own SN, not the inverter's
+            businessType
+        });
+
+        return reading || null;
+    } catch (err) {
+        logError('Battery reading failed', { error: err.message });
+        return null;
+    }
+}
+
 exports.handler = async () => {
     try {
         const { clientId, clientSecret } = await loadSolaxCredentials();
         const baseUrl = process.env.SOLAX_BASE_URL;
+        const businessType = Number(process.env.SOLAX_BUSINESS_TYPE) || BUSINESS_TYPE.RESIDENTIAL;
 
         const accessToken = await getAccessToken({ baseUrl, clientId, clientSecret });
 
-        const [reading] = await getDeviceRealtimeData(baseUrl, accessToken, {
+        const [inverterReading] = await getDeviceRealtimeData(baseUrl, accessToken, {
             snList: process.env.SOLAX_INVERTER_SN,
             deviceType: Number(process.env.SOLAX_DEVICE_TYPE) || DEVICE_TYPE.INVERTER,
-            businessType: Number(process.env.SOLAX_BUSINESS_TYPE) || BUSINESS_TYPE.RESIDENTIAL
+            businessType
         });
 
-        if (!reading) {
+        if (!inverterReading) {
             logError('No reading returned for inverter', { sn: process.env.SOLAX_INVERTER_SN });
             return { statusCode: 502 };
         }
 
+        const batteryReading = await fetchBatteryReading(baseUrl, accessToken, businessType);
+
         await docClient.send(new PutCommand({
             TableName: process.env.ENERGY_READINGS_TABLE,
             Item: {
-                DeviceSn: reading.deviceSn,
+                DeviceSn: inverterReading.deviceSn,
                 Timestamp: Math.floor(Date.now() / 1000),
-                dataTime: reading.dataTime,
-                deviceStatus: reading.deviceStatus,
-                dailyYield: reading.dailyYield,
-                totalYield: reading.totalYield,
-                dailyACOutput: reading.dailyACOutput,
-                totalACOutput: reading.totalACOutput,
-                gridPower: reading.gridPower,
-                todayImportEnergy: reading.todayImportEnergy,
-                totalImportEnergy: reading.totalImportEnergy,
-                todayExportEnergy: reading.todayExportEnergy,
-                totalExportEnergy: reading.totalExportEnergy,
-                totalActivePower: reading.totalActivePower
+                dataTime: inverterReading.dataTime,
+                deviceStatus: inverterReading.deviceStatus,
+                dailyYield: inverterReading.dailyYield,
+                totalYield: inverterReading.totalYield,
+                dailyACOutput: inverterReading.dailyACOutput,
+                totalACOutput: inverterReading.totalACOutput,
+                gridPower: inverterReading.gridPower,
+                todayImportEnergy: inverterReading.todayImportEnergy,
+                totalImportEnergy: inverterReading.totalImportEnergy,
+                todayExportEnergy: inverterReading.todayExportEnergy,
+                totalExportEnergy: inverterReading.totalExportEnergy,
+                totalActivePower: inverterReading.totalActivePower,
+                ...(batteryReading && {
+                    batteryDeviceSn: batteryReading.deviceSn,
+                    batteryDeviceStatus: batteryReading.deviceStatus,
+                    batterySOC: batteryReading.batterySOC,
+                    batterySOH: batteryReading.batterySOH,
+                    batteryRemainings: batteryReading.batteryRemainings,
+                    chargeDischargePower: batteryReading.chargeDischargePower,
+                    batteryCycleTimes: batteryReading.batteryCycleTimes,
+                    // docs/solax-apis.md documents the source field as "totalDevicCharge" (sic)
+                    totalDeviceCharge: batteryReading.totalDevicCharge,
+                    totalDeviceDischarge: batteryReading.totalDeviceDischarge
+                })
             }
         }));
 
-        logInfo('Reading stored', { deviceSn: reading.deviceSn, dataTime: reading.dataTime });
+        logInfo('Reading stored', {
+            deviceSn: inverterReading.deviceSn,
+            dataTime: inverterReading.dataTime,
+            batteryIncluded: Boolean(batteryReading)
+        });
         return { statusCode: 200 };
     } catch (err) {
         logError('Poll failed', { error: err.message });
         throw err;
     }
 };
+
+module.exports.resolveBatterySn = resolveBatterySn;
+module.exports.fetchBatteryReading = fetchBatteryReading;

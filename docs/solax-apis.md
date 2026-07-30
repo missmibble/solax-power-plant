@@ -210,3 +210,68 @@ Returns: `result[]` of `{ sn, status }` (status = Appendix 8) — use this to po
 | Current Limit | `POST /openapi/v2/device/evc_control/set_evc_current_limit` | `currentLimit` (model-dependent range: 4.6kW [6-20], 6kW [6-30], 7/7.6/22kW [6,32], 9.6kW [6-40], 11kW [6-16]) |
 
 ---
+
+Here's the complete Attachment (Appendix) section from the SolaX Developer Portal, which contains all the code/enum reference tables used throughout the API responses.
+
+## Appendix 1: Response Code Definitions
+Global `code` field returned by most endpoints:
+
+| Code | Meaning |
+|---|---|
+| 10000 | Operation successful |
+| 10001 | Operation failed |
+| 11500 | System busy, try again later |
+| 10200 | Operation abnormal — see message field for details |
+| 10400 | Request not authenticated |
+| 10401 | Incorrect username/password |
+| 10402 | access_token validation failed |
+| 10403 | No access rights to this interface |
+| 10404 | Callback function not configured |
+| 10405 | API call quota exhausted |
+| 10406 | API call rate limit reached, try again later |
+| 10500 | User has no device data permission |
+| 10505 | Device unauthorized |
+| 10506 | Plant unauthorized |
+
+## Appendix 2: plantState Field
+Meaning depends on businessType:
+
+Residential (businessType=1): 0 = Connecting, 1 = Offline, >1 = Online
+Commercial & Industrial (businessType=4): 0 = Offline, 1 = Normal, 2 = Failure (emergency alarm), 3 = Warning (general alarm), 4 = Connecting
+
+## Appendix 3: deviceType Field
+1 = Inverter, 2 = Battery, 3 = Meter, 4 = EV Charger, 100 = EMS System
+
+## Appendix 4: deviceModel Field
+This is a large lookup table mapping numeric `deviceModel` values to specific hardware model names, split by businessType.
+
+**Residential (businessType=1):**
+Inverters (deviceType=1) span values 1–109, covering families such as X1-LX, X-Hybrid, X1/X3-Hybrid generations (G1–G4), X1-Boost/Air/Mini, X3-20K/30K, X3-MIC/PRO (and G2/G3), X1-Smart (and G2), X1-AC, the A1 series (A1-Hybrid, A1-FIT, A1, A1-HYB-G2/G3, A1-AC-G2, A1-SMT-G2, A1-Micro), J1-ESS (and HB-2), X3-AELIO (incl. LA variant), X1-SPT, X3-IES/X1-IES/C3-IES/X3-IES-A/X1-IES-A/X3-IES-P, X3-ULT (and GLV), X1-VAST, J3-ULT variants, X1-Micro/X-MS 2700, OG, LVE, AEGIS, and newer X3-FTH/MGA-G2/GRAND-HV/FORTH-PLUS and X1-Hybrid-LV/Lite-LV models.
+Meters (deviceType=3): 50 = Meter X, 176 = M1-40, 178 = M3-40, 179 = M3-40-Dual, 181 = M3-40-Wide.
+EV Chargers (deviceType=4): 1 = X1/X3-EVC, 2 = X1/X3-EVC G1.1, 3 = X1/X3-HAC, 4 = J1-EVC, 5 = A1-HAC, 6 = C1/C3-HAC.
+
+**Commercial & Industrial (businessType=4):**
+Inverters (deviceType=1): 1/31/42 = X3-AELIO, 2 = X3-TRENE-100KI, 3 = X3-TRENE-100K, 4 = X3-TRENE, 16 = X3-PRO G2, 100 = X3-FORTH, 101 = X3-MEGA G2, 104 = X3-GRAND, 105 = X3-FORTH PLUS.
+Batteries (deviceType=2): 1 = TB-HR140, 2 = TB-HR522, 145 = TSYS-HS51, 163 = TR-HR140.
+Meters (deviceType=3): 0–3 = DTSU666-CT, 4–5 = Wi-BR DTSU666-CT, 6 = CT, 7 = DTSU666-CT, 8 = UMG 103-CBM, 9 = M3-40-Dual, 10 = M3-40, 11 = PRISMA-310A.
+EV Chargers (deviceType=4): same mapping as residential (1–6 above).
+
+## Appendix 5: flag Field (Parallel/Master-Slave Status)
+Residential: 0 = Not in parallel, 1 = Master, 2–4 = Slave 1–3
+C&I: null = Not in parallel, 0 = Master, 1 = Slave
+
+## Appendix 6: deviceStatus Field
+**Inverter (deviceType=1)** — a large state list including: 100 Waiting, 101 Self-check, 102 Normal, 103 Fault (recoverable), 104 Permanent Fault, 105 Update Mode, 106 EPS Check Mode, 107 EPS Mode, 108 Self Test, 109 Idle Mode, 110 Standby, 111 Pv Wake Up Bat Mode, 112 Gen Check Mode, 113 Gen Run Mode, 114 RSD Standby; 130 VPP Mode, 131–135 TOU sub-states (Self use/Charging/Discharging/Battery off/Peak Shaving), 136–139 Gen/battery-expansion/heating normal modes, 140 Start Mode, 141–147 Normal Mode (R-1 to R-7); 150 Self Use, 151 Force Time Use, 152 Back Up Mode, 153 Feed-in Priority, 154 Demand Mode, 155 ConstPower Mode, 160 OpenAdr Mode, 170 Stop Mode, 171 Debug Mode, 174–177 Smart self-use/feed-in/no-discharge/WLV-0% normal states; 1301–1309 correspond directly to the VPP remote-control modes (Power Control, Electric Quantity Target, SOC Target, Push Power Positive/Negative, Push Power Zero, Self-Consume Charge/Discharge, Self-Consume Charge Only, PV&BAT Duration, PV&BAT Target SOC).
+
+**Battery (deviceType=2)** — Residential: 0 = Idle, 1 = Work. C&I: 0 = Idle (discharge self-check), 1 = Standby, 2 = Discharge Pre-Charge, 3 = Charge-to-discharge pre-charge, 4 = Discharging, 5 = Discharging Fault, 6 = Charge switching current limit, 7 = Charge Self-Test, 8 = Charge Pre-Charge, 9 = Charging, 10 = Charging Fault, 11 = Power Off Status.
+
+**EV Charger (deviceType=4)** — 0 Available, 1 Preparing, 2 Charging, 3 Finish, 4 Faulted, 5 Unavailable, 6 Reserved, 7 SuspendedEV, 8 SuspendedEVSE, 9 Update, 10 CardActivation, 11 StartDelay, 12 ChargPause, 13 Stopping.
+
+## Appendix 7: deviceWorkingMode Field (EV Charger)
+0 = STOP, 1 = FAST, 2 = ECO, 3 = GREEN
+
+## Appendix 8: Command Delivery status Field
+Used in every control-command response to indicate execution state:
+1 = Device Offline, 2 = Command issuance failed, 3 = Command issuance succeeded, 4 = Device received and started execution, 5 = Device execution failed, 6 = Execution timed out
+
+---

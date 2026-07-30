@@ -49,10 +49,12 @@
     "baseUrl": "https://openapi-eu.solaxcloud.com",
     "businessType": 1,
     "deviceType": 1,
-    "inverterSn": "TODO_INVERTER_SN"
+    "inverterSn": "TODO_INVERTER_SN",
+    "batterySn": "TODO_BATTERY_SN"
   },
   "tariff": {
     "currency": "AUD",
+    "timezone": "Australia/Sydney",
     "importRates": [
       { "label": "night-ev-charge", "startTime": "00:00", "endTime": "06:00", "rate": 0.08 },
       { "label": "shoulder-morning", "startTime": "06:00", "endTime": "09:00", "rate": 0.32384 },

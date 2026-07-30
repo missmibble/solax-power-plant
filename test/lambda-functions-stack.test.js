@@ -76,17 +76,34 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
-    test('DashboardApiFunction and ReportFunction get the tariff structure as an env var', () => {
+    test('DashboardApiFunction, AlertFunction, and ReportFunction get the tariff structure as an env var', () => {
         const tariffJson = JSON.stringify(config.tariff);
 
-        template.hasResourceProperties('AWS::Lambda::Function', {
-            FunctionName: config.lambda.dashboardApiFunction.functionName,
-            Environment: { Variables: Match.objectLike({ TARIFF_STRUCTURE: tariffJson }) }
-        });
+        for (const fn of ['dashboardApiFunction', 'alertFunction', 'reportFunction']) {
+            template.hasResourceProperties('AWS::Lambda::Function', {
+                FunctionName: config.lambda[fn].functionName,
+                Environment: { Variables: Match.objectLike({ TARIFF_STRUCTURE: tariffJson }) }
+            });
+        }
+    });
 
+    test('AlertFunction role can query the energy readings table (not just stream permissions)', () => {
+        template.hasResourceProperties('AWS::IAM::Policy', {
+            PolicyName: Match.stringLikeRegexp('AlertFunction'),
+            PolicyDocument: {
+                Statement: Match.arrayWith([
+                    Match.objectLike({
+                        Action: Match.arrayWith(['dynamodb:Query'])
+                    })
+                ])
+            }
+        });
+    });
+
+    test('PollerFunction gets the battery SN env var for auto-discovery fallback', () => {
         template.hasResourceProperties('AWS::Lambda::Function', {
-            FunctionName: config.lambda.reportFunction.functionName,
-            Environment: { Variables: Match.objectLike({ TARIFF_STRUCTURE: tariffJson }) }
+            FunctionName: config.lambda.pollerFunction.functionName,
+            Environment: { Variables: Match.objectLike({ SOLAX_BATTERY_SN: config.solax.batterySn }) }
         });
     });
 });

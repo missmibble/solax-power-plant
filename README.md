@@ -1,8 +1,10 @@
 # PowerPlant
 
-AWS CDK app that polls the SolaX Cloud API for a home solar + battery system, stores the full usage history, and recommends optimised battery configuration options via a nightly assessment report — replacing the manual report exports currently used. See [PowerPlant_Project_Brief.md](PowerPlant_Project_Brief.md) for full background, site details, and the phased build plan.
+AWS CDK app that polls the SolaX Cloud API for a home solar + battery system, stores the full usage history, and recommends optimised battery configuration options via a nightly assessment report — replacing the manual report exports currently used. See [docs/PowerPlant_Project_Brief.md](docs/PowerPlant_Project_Brief.md) for full background, site details, and the phased build plan.
 
-`PollerFunction` calls the real SolaX Cloud API (auth + device realtime data) and writes to DynamoDB; `DashboardApiFunction`, `AlertFunction`, and `ReportFunction` are still `TODO` stubs. See [solax-apis.md](solax-apis.md) for the full API reference (auth, monitoring, and control endpoints) this was built against — note it's truncated mid-document and never includes the portal's Appendices 1-8 (device type/model/status codes), so some fields (e.g. the Battery device's `deviceType`, `deviceStatus` fault-code meanings) are still unconfirmed.
+All four Lambdas are implemented and deployed: `PollerFunction` calls the real SolaX Cloud API (Inverter + auto-discovered Battery device) and writes to DynamoDB; `DashboardApiFunction` serves cost-aware daily/weekly rollups including battery charge/discharge/SOC; `AlertFunction` watches for import anomalies and real inverter fault codes; `ReportFunction` publishes a nightly usage + battery-configuration-recommendation report, SOC-aware when battery data is available. See [docs/solax-apis.md](docs/solax-apis.md) for the full API reference this was built against, including Appendices 1-8 (device type/model/status codes) which resolved the two gaps that used to limit this: the Battery device's `deviceType` (`2`) and the Inverter's fault `deviceStatus` codes (`103` recoverable, `104` permanent) are now both known and used.
+
+Both SNS topics (`powerplant-alerts`, `powerplant-reports`) have a confirmed email subscription.
 
 ## Structure
 
@@ -25,12 +27,18 @@ PowerPlant/
 ├── test/
 │   ├── infrastructure-stack.test.js
 │   ├── lambda-functions-stack.test.js
-│   └── solax-client.test.js
+│   ├── solax-client.test.js
+│   ├── tariff.test.js
+│   ├── dashboard-api-function.test.js
+│   ├── alert-function.test.js
+│   └── report-function.test.js
 ├── test-events/                   # Lambda test payloads
 ├── docs/
+│   ├── PowerPlant_Project_Brief.md
+│   ├── solax-apis.md              # SolaX Cloud OpenAPI reference (source for solax-client.js)
+│   └── README.md
 ├── scripts/
 │   └── deploy.sh
-├── solax-apis.md                  # SolaX Cloud OpenAPI reference (source for solax-client.js)
 ├── cdk.json
 └── package.json
 ```
@@ -68,10 +76,9 @@ npm run install-all   # installs each lambda/*/'s own dependencies
 ```bash
 cp config/dev-powerplant.json config/dev-powerplant.local.json   # gitignored (config/*.local.json)
 # edit dev-powerplant.local.json: env.account, tags.Owner, s3.website.bucketName, solax.inverterSn
-export CDK_CONFIG=dev-powerplant.local.json                      # picked up by bin/powerplant.js
 ```
 
-Everything below assumes `CDK_CONFIG` is set this way when you're deploying against real infrastructure.
+Deploy against it with `scripts/deploy.sh`'s `--config`/`-c` flag (see Deploy below) — no env var to remember, and nothing to add to `package.json` per config file. `bin/powerplant.js` itself still honors `CDK_CONFIG` directly too, for `cdk diff`/`synth` run outside the deploy script.
 
 ### SolaX credentials (SSM Parameter Store)
 
@@ -79,7 +86,7 @@ CloudFormation can't create `SecureString` SSM parameters natively, so `Infrastr
 
 ### SolaX device/API settings
 
-The `solax` block holds the non-secret identifiers `PollerFunction` needs: `baseUrl` (`https://openapi-eu.solaxcloud.com`), `businessType` (`1` = Residential), `deviceType` (`1` = Inverter), and `inverterSn` (your inverter's serial — fill this in on your local config copy). The energy readings table's partition key is `DeviceSn` — the identifier the confirmed OpenAPI platform actually uses, not the `wifiSn`/`registerNo` from the older `dataAccess/realtimeInfo` endpoint the project brief originally assumed.
+The `solax` block holds the non-secret identifiers `PollerFunction` needs: `baseUrl` (`https://openapi-eu.solaxcloud.com`), `businessType` (`1` = Residential), `deviceType` (`1` = Inverter), `inverterSn` (your inverter's serial — fill this in on your local config copy), and `batterySn` (optional — leave as the `TODO_BATTERY_SN` placeholder and `PollerFunction` will auto-discover the battery device via `getDeviceInfo`; set it explicitly only if you want to pin a specific device or skip that extra API call). The energy readings table's partition key is `DeviceSn` — the identifier the confirmed OpenAPI platform actually uses, not the `wifiSn`/`registerNo` from the older `dataAccess/realtimeInfo` endpoint the project brief originally assumed.
 
 ## Test
 
@@ -93,12 +100,20 @@ npm test
 # First time only, per account/region
 npx cdk bootstrap aws://<your-account-id>/<your-region>
 
-npm run deploy:dev
-# or individually:
-npx cdk diff
-npx cdk deploy --all
+npm run deploy:dev                              # config/dev-powerplant.json (placeholder values)
+bash scripts/deploy.sh --config dev-powerplant.local.json   # your real config, gitignored
+bash scripts/deploy.sh -c dev-powerplant.local.json         # -c is the short form
+
+# or individually, e.g. against the local config:
+CDK_CONFIG=dev-powerplant.local.json npx cdk diff
+CDK_CONFIG=dev-powerplant.local.json npx cdk deploy --all
 ```
+
+`scripts/deploy.sh` accepts either a bare env name (`dev`, `prod` → resolves to `config/<env>-powerplant.json`) or `--config`/`-c <file>` to point at any file in `config/` directly — including a gitignored one — without adding a matching `package.json` script for every config variant.
 
 ## Next steps
 
-`PollerFunction` only fetches the Inverter device — the Battery device's `deviceType` code isn't in `solax-apis.md` (missing appendices), so SOC/charge-discharge fields aren't captured yet. Confirming that (e.g. via `getDeviceInfo` with a `deviceType` sweep, or the missing Appendix 3) and adding a second `getDeviceRealtimeData` call is the next concrete step. After that, per the project brief's build phases: implement `DashboardApiFunction` (dashboard), then cost tracking (needs the peak/shoulder import rate and feed-in tariff, not yet known), then flesh out `AlertFunction`'s fault/anomaly rules (blocked on the same missing `deviceStatus` appendix), then `ReportFunction`'s usage assessment and battery-configuration recommendation logic. The S3 + CloudFront web dashboard distribution itself hasn't been scaffolded yet — add it as its own stack once the dashboard API is working.
+- **Timezone**: `config.tariff.timezone` defaults to `Australia/Sydney` (assumed) — if the site is in a state that doesn't observe DST (e.g. Queensland), correct this in your local config, since it changes which tariff window a reading near a DST transition falls into.
+- The S3 + CloudFront web dashboard distribution itself hasn't been scaffolded yet — `DashboardApiFunction`'s `GET /readings` is implemented, but there's no frontend to call it from.
+- `AlertFunction` only checks the Inverter's fault codes (`103`/`104`) — residential batteries only ever report Idle(0)/Work(1) (`docs/solax-apis.md` Appendix 6), so there's no battery fault state to check.
+- Control/write endpoints (EMS work modes, inverter work mode control, VPP, export/import limits, EV charger control, battery heating — `docs/solax-apis.md` §3, §6-11) aren't implemented — this app recommends battery configuration changes, it doesn't apply them automatically. Wire those in if that changes.
