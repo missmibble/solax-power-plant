@@ -1,0 +1,13 @@
+{
+  "name": "pollerfunction",
+  "version": "1.0.0",
+  "description": "Polls SolaX Cloud realtimeInfo endpoint and writes readings to DynamoDB",
+  "type": "commonjs",
+  "main": "PollerFunction.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.995.0",
+    "@aws-sdk/lib-dynamodb": "^3.995.0",
+    "@aws-sdk/client-ssm": "^3.995.0",
+    "powerplant-shared": "file:../Utilities"
+  }
+}

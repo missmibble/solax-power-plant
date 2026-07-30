@@ -1,0 +1,106 @@
+{
+  "name": "powerplant",
+  "deployment": {
+    "lambdaAlias": "dev",
+    "retainVersions": 3
+  },
+  "env": {
+    "account": "TODO_AWS_ACCOUNT_ID",
+    "region": "ap-southeast-2"
+  },
+  "tags": {
+    "Environment": "dev",
+    "Project": "PowerPlant",
+    "Owner": "TODO_OWNER",
+    "ManagedBy": "CDK"
+  },
+  "dynamodb": {
+    "energyReadingsTable": {
+      "tableName": "POWERPLANT-ENERGY-READINGS",
+      "cfResource": "PowerPlantEnergyReadingsTable",
+      "description": "Time-series store of SolaX Cloud device realtime_data readings, polled every 5 minutes",
+      "partitionKey": { "name": "DeviceSn", "type": "string" },
+      "sortKey": { "name": "Timestamp", "type": "number" },
+      "indexRequired": false,
+      "streamEnabled": true,
+      "streamViewType": "NEW_IMAGE"
+    }
+  },
+  "s3": {
+    "website": {
+      "bucketName": "powerplant-dashboard-000000000000",
+      "cfResource": "PowerPlantDashboardBucket",
+      "description": "Static assets for the web dashboard (S3 + CloudFront is a later build phase)"
+    }
+  },
+  "sns": {
+    "alertsTopic": {
+      "topicName": "powerplant-alerts",
+      "cfResource": "PowerPlantAlertsTopic",
+      "description": "Inverter/battery fault and anomaly notifications"
+    },
+    "reportsTopic": {
+      "topicName": "powerplant-reports",
+      "cfResource": "PowerPlantReportsTopic",
+      "description": "Nightly usage assessment and battery configuration recommendation report"
+    }
+  },
+  "solax": {
+    "baseUrl": "https://openapi-eu.solaxcloud.com",
+    "businessType": 1,
+    "deviceType": 1,
+    "inverterSn": "TODO_INVERTER_SN"
+  },
+  "ssm": {
+    "solaxClientId": {
+      "parameterName": "/powerplant/solax/client-id",
+      "cfResource": "PowerPlantSolaxClientIdParam",
+      "description": "SolaX Cloud OAuth2 Client ID (developer.solaxcloud.com)"
+    },
+    "solaxClientSecret": {
+      "parameterName": "/powerplant/solax/client-secret",
+      "cfResource": "PowerPlantSolaxClientSecretParam",
+      "description": "SolaX Cloud OAuth2 Client Secret (developer.solaxcloud.com)"
+    }
+  },
+  "lambda": {
+    "pollerFunction": {
+      "functionName": "PollerFunction",
+      "cfResource": "PowerPlantPollerFunction",
+      "description": "Polls SolaX Cloud device realtime_data endpoint every 5 minutes and writes a reading to DynamoDB",
+      "assetPath": "lambda/PollerFunction",
+      "timer": 30,
+      "schedule": "rate(5 minutes)"
+    },
+    "dashboardApiFunction": {
+      "functionName": "DashboardApiFunction",
+      "cfResource": "PowerPlantDashboardApiFunction",
+      "description": "Aggregates DynamoDB readings into daily/weekly rollups for the dashboard",
+      "assetPath": "lambda/DashboardApiFunction",
+      "timer": 30
+    },
+    "alertFunction": {
+      "functionName": "AlertFunction",
+      "cfResource": "PowerPlantAlertFunction",
+      "description": "Watches new readings for inverter/battery faults and unusually high daytime import; publishes to SNS",
+      "assetPath": "lambda/AlertFunction",
+      "timer": 30
+    },
+    "reportFunction": {
+      "functionName": "ReportFunction",
+      "cfResource": "PowerPlantReportFunction",
+      "description": "Nightly assessment of stored usage data; recommends battery configuration optimizations and publishes a report",
+      "assetPath": "lambda/ReportFunction",
+      "timer": 60,
+      "schedule": "cron(0 16 * * ? *)"
+    }
+  },
+  "api": {
+    "restApiName": "PowerPlant Dashboard API",
+    "cfResource": "PowerPlantRestApi",
+    "description": "REST API serving dashboard rollups",
+    "stageName": "dev",
+    "apiKeyRequired": true,
+    "corsAllowOrigins": ["*"]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "powerplant-shared",
+  "version": "1.0.0",
+  "description": "Shared logger and SolaX Cloud API client for PowerPlant Lambda functions",
+  "main": "index.js"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "reportfunction",
+  "version": "1.0.0",
+  "description": "Nightly assessment of usage data; recommends battery configuration optimizations and publishes a report",
+  "type": "commonjs",
+  "main": "ReportFunction.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.995.0",
+    "@aws-sdk/lib-dynamodb": "^3.995.0",
+    "@aws-sdk/client-sns": "^3.995.0",
+    "powerplant-shared": "file:../Utilities"
+  }
+}

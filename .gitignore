@@ -1,0 +1,29 @@
+node_modules
+package-lock.json
+**/package-lock.json
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+# Environment-specific config overrides
+config/prod-*.json
+config/*.local.json
+
+# Secrets
+*.pem
+.env
+.env.*
+solax-application-creds.txt
+
+# Build output
+dist/
+*.js.map
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store

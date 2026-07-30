@@ -1,0 +1,11 @@
+{
+  "name": "alertfunction",
+  "version": "1.0.0",
+  "description": "Watches new energy readings for faults/anomalies and publishes SNS alerts",
+  "type": "commonjs",
+  "main": "AlertFunction.js",
+  "dependencies": {
+    "@aws-sdk/client-sns": "^3.995.0",
+    "powerplant-shared": "file:../Utilities"
+  }
+}

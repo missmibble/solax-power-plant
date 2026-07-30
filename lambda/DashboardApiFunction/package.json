@@ -1,0 +1,12 @@
+{
+  "name": "dashboardapifunction",
+  "version": "1.0.0",
+  "description": "Aggregates DynamoDB energy readings into dashboard rollups",
+  "type": "commonjs",
+  "main": "DashboardApiFunction.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.995.0",
+    "@aws-sdk/lib-dynamodb": "^3.995.0",
+    "powerplant-shared": "file:../Utilities"
+  }
+}
