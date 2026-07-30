@@ -31,8 +31,8 @@ describe('LambdaFunctionsStack', () => {
         template = Template.fromStack(lambdaStack);
     });
 
-    test('creates PollerFunction, DashboardApiFunction, AlertFunction, and ReportFunction', () => {
-        template.resourceCountIs('AWS::Lambda::Function', 4);
+    test('creates PollerFunction, DashboardApiFunction, AlertFunction, ReportFunction, and BatteryControlFunction', () => {
+        template.resourceCountIs('AWS::Lambda::Function', 5);
     });
 
     test('schedules PollerFunction every 5 minutes via EventBridge', () => {
@@ -76,8 +76,8 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
-    test('DashboardApiFunction, AlertFunction, and ReportFunction get the tariff structure as an env var', () => {
-        const tariffJson = JSON.stringify(config.tariff);
+    test('DashboardApiFunction, AlertFunction, and ReportFunction get the tariff structure (with location timezone merged in) as an env var', () => {
+        const tariffJson = JSON.stringify({ ...config.tariff, timezone: config.location.timezone });
 
         for (const fn of ['dashboardApiFunction', 'alertFunction', 'reportFunction']) {
             template.hasResourceProperties('AWS::Lambda::Function', {
@@ -104,6 +104,49 @@ describe('LambdaFunctionsStack', () => {
         template.hasResourceProperties('AWS::Lambda::Function', {
             FunctionName: config.lambda.pollerFunction.functionName,
             Environment: { Variables: Match.objectLike({ SOLAX_BATTERY_SN: config.solax.batterySn }) }
+        });
+    });
+
+    test('schedules BatteryControlFunction nightly via EventBridge', () => {
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.batteryControlFunction.schedule
+        });
+    });
+
+    test('BatteryControlFunction gets the weather and battery-control config as env vars', () => {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.batteryControlFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({
+                    WEATHER_LAT: String(config.location.lat),
+                    WEATHER_LON: String(config.location.lon),
+                    BATTERY_CONTROL_CONFIG: JSON.stringify(config.batteryControl)
+                })
+            }
+        });
+    });
+
+    test('BatteryControlFunction role can read SSM parameters (SolaX creds + weather API key)', () => {
+        const policies = template.findResources('AWS::IAM::Policy', {
+            Properties: { PolicyName: Match.stringLikeRegexp('BatteryControlFunction') }
+        });
+        const [policy] = Object.values(policies);
+        const ssmStatement = policy.Properties.PolicyDocument.Statement.find(
+            s => s.Action?.includes?.('ssm:GetParameter')
+        );
+
+        expect(ssmStatement).toBeDefined();
+        expect(ssmStatement.Resource).toHaveLength(3);
+    });
+
+    test('BatteryControlFunction role can publish to both SNS topics', () => {
+        template.hasResourceProperties('AWS::IAM::Policy', {
+            PolicyName: Match.stringLikeRegexp('BatteryControlFunction'),
+            PolicyDocument: {
+                Statement: Match.arrayWith([
+                    Match.objectLike({ Action: 'sns:Publish' })
+                ])
+            }
         });
     });
 });

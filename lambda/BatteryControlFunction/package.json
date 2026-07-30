@@ -1,0 +1,12 @@
+{
+  "name": "batterycontrolfunction",
+  "version": "1.0.0",
+  "description": "Checks tomorrow's weather forecast and adjusts the inverter's grid-charge target accordingly; dry-run by default",
+  "type": "commonjs",
+  "main": "BatteryControlFunction.js",
+  "dependencies": {
+    "@aws-sdk/client-ssm": "^3.995.0",
+    "@aws-sdk/client-sns": "^3.995.0",
+    "powerplant-shared": "file:../Utilities"
+  }
+}

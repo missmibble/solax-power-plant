@@ -7,6 +7,9 @@ const { aggregateReadings } = require('../lambda/DashboardApiFunction/DashboardA
 const config = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'config', 'dev-powerplant.json'), 'utf8')
 );
+// Timezone lives with the site location (config.location), not duplicated in
+// config.tariff — see lib/lambda-functions-stack.js's tariffStructure.
+config.tariff.timezone = config.location.timezone;
 
 // 2026-07-30 is Australian winter — no DST — so Australia/Sydney is a fixed
 // UTC+10 for every timestamp below.

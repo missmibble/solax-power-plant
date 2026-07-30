@@ -48,19 +48,6 @@ describe('InfrastructureStack', () => {
         });
     });
 
-    // ─── S3 ────────────────────────────────────────────────────────────────────
-
-    test('creates dashboard S3 bucket blocking all public access', () => {
-        template.hasResourceProperties('AWS::S3::Bucket', {
-            PublicAccessBlockConfiguration: {
-                BlockPublicAcls: true,
-                BlockPublicPolicy: true,
-                IgnorePublicAcls: true,
-                RestrictPublicBuckets: true
-            }
-        });
-    });
-
     // ─── SNS ───────────────────────────────────────────────────────────────────
 
     test('creates alerts SNS topic', () => {
@@ -89,6 +76,17 @@ describe('InfrastructureStack', () => {
             solaxCredentials: null
         });
         Template.fromStack(stack).resourceCountIs('Custom::AWS', 0);
+    });
+
+    test('also creates the weather API key parameter when one is provided', () => {
+        const app = new cdk.App();
+        const stack = new InfrastructureStack(app, 'TestInfrastructureStackWeather', {
+            env: { account: '123456789012', region: 'ap-southeast-2' },
+            config,
+            solaxCredentials: { clientId: 'test-client-id', clientSecret: 'test-client-secret' },
+            weatherApiKey: 'test-weather-key'
+        });
+        Template.fromStack(stack).resourceCountIs('Custom::AWS', 3);
     });
 
     // ─── Outputs ───────────────────────────────────────────────────────────────

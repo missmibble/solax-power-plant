@@ -51,4 +51,15 @@ function exportCredit(tariff, kwh) {
     return kwh * (tariff.feedInRate || 0);
 }
 
-module.exports = { findImportRateWindow, importCostForWindow, exportCredit };
+// Sortable YYYY-MM-DD in local time — used to bucket readings into calendar
+// days (e.g. ReportFunction's multi-day history summary for AI insights).
+function localDateString(timestampSeconds, timezone) {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(new Date(timestampSeconds * 1000));
+}
+
+module.exports = { findImportRateWindow, importCostForWindow, exportCredit, localDateString };

@@ -52,9 +52,13 @@
     "inverterSn": "TODO_INVERTER_SN",
     "batterySn": "TODO_BATTERY_SN"
   },
+  "location": {
+    "lat": 0,
+    "lon": 0,
+    "timezone": "Australia/Sydney"
+  },
   "tariff": {
     "currency": "AUD",
-    "timezone": "Australia/Sydney",
     "importRates": [
       { "label": "night-ev-charge", "startTime": "00:00", "endTime": "06:00", "rate": 0.08 },
       { "label": "shoulder-morning", "startTime": "06:00", "endTime": "09:00", "rate": 0.32384 },
@@ -63,6 +67,29 @@
       { "label": "shoulder-night", "startTime": "21:00", "endTime": "24:00", "rate": 0.32384 }
     ],
     "feedInRate": 0.02
+  },
+  "bedrock": {
+    "modelId": "TODO_BEDROCK_MODEL_ID",
+    "historyLookbackDays": 14
+  },
+  "weather": {
+    "provider": "openweathermap"
+  },
+  "batteryControl": {
+    "dryRun": true,
+    "minSoc": 10,
+    "chargeFromGridEnable": 1,
+    "chargeUpperSocSunny": 40,
+    "chargeUpperSocOvercast": 100,
+    "chargeStartTimePeriod1": "00:00",
+    "chargeEndTimePeriod1": "06:00",
+    "chargeStartTimePeriod2": "00:00",
+    "chargeEndTimePeriod2": "00:00",
+    "dischargeStartTimePeriod1": "00:00",
+    "dischargeEndTimePeriod1": "23:59",
+    "dischargeStartTimePeriod2": "00:00",
+    "dischargeEndTimePeriod2": "00:00",
+    "enableTimePeriod2": 0
   },
   "ssm": {
     "solaxClientId": {
@@ -74,6 +101,11 @@
       "parameterName": "/powerplant/solax/client-secret",
       "cfResource": "PowerPlantSolaxClientSecretParam",
       "description": "SolaX Cloud OAuth2 Client Secret (developer.solaxcloud.com)"
+    },
+    "weatherApiKey": {
+      "parameterName": "/powerplant/weather/api-key",
+      "cfResource": "PowerPlantWeatherApiKeyParam",
+      "description": "OpenWeatherMap API key"
     }
   },
   "lambda": {
@@ -106,6 +138,14 @@
       "assetPath": "lambda/ReportFunction",
       "timer": 60,
       "schedule": "cron(0 16 * * ? *)"
+    },
+    "batteryControlFunction": {
+      "functionName": "BatteryControlFunction",
+      "cfResource": "PowerPlantBatteryControlFunction",
+      "description": "Checks tomorrow's weather forecast and adjusts the inverter's grid-charge target (chargeUpperSoc) accordingly; dry-run by default",
+      "assetPath": "lambda/BatteryControlFunction",
+      "timer": 30,
+      "schedule": "cron(0 10 * * ? *)"
     }
   },
   "api": {
@@ -114,6 +154,7 @@
     "description": "REST API serving dashboard rollups",
     "stageName": "dev",
     "apiKeyRequired": true,
+    "apiKeyValue": "TODO_API_KEY_VALUE_PLACEHOLDER",
     "corsAllowOrigins": ["*"]
   }
 }

@@ -2,11 +2,14 @@
 
 const fs = require('fs');
 const path = require('path');
-const { assessUsage, formatReport } = require('../lambda/ReportFunction/ReportFunction');
+const { assessUsage, formatReport, dailySummaries, parseAiResponse } = require('../lambda/ReportFunction/ReportFunction');
 
 const config = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'config', 'dev-powerplant.json'), 'utf8')
 );
+// Timezone lives with the site location (config.location), not duplicated in
+// config.tariff — see lib/lambda-functions-stack.js's tariffStructure.
+config.tariff.timezone = config.location.timezone;
 
 // 2026-07-30 is Australian winter — no DST — so Australia/Sydney is a fixed
 // UTC+10 for every timestamp below.
@@ -147,5 +150,90 @@ describe('ReportFunction formatReport', () => {
 
         expect(report).toContain('went from 60% to 20% across');
         expect(report).toContain('discharge cutoff SOC or larger capacity');
+    });
+
+    test('includes the AI narrative and anomalies when insights are provided', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const report = formatReport(assessment, config.tariff, 1, {
+            narrative: 'Today tracked close to the recent pattern.',
+            anomalies: ['PV yield was 15% below the past week\'s average.']
+        });
+
+        expect(report).toContain('AI insights:');
+        expect(report).toContain('Today tracked close to the recent pattern.');
+        expect(report).toContain('Anomalies flagged:');
+        expect(report).toContain("PV yield was 15% below the past week's average.");
+    });
+
+    test('reports "none" when the AI found no anomalies', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const report = formatReport(assessment, config.tariff, 1, {
+            narrative: 'Nothing unusual today.',
+            anomalies: []
+        });
+
+        expect(report).toContain('Anomalies flagged: none');
+    });
+
+    test('omits the AI insights section entirely when none was generated', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const report = formatReport(assessment, config.tariff, 1, null);
+
+        expect(report).not.toContain('AI insights:');
+    });
+});
+
+describe('ReportFunction dailySummaries', () => {
+    test('buckets deltas by local calendar day', () => {
+        const twoDayReadings = [
+            { Timestamp: utcSeconds(5, 0), totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5 },
+            { Timestamp: utcSeconds(18, 0), totalYield: 105, totalImportEnergy: 53, totalExportEnergy: 6 },
+            // next local day (2026-07-31)
+            { Timestamp: utcSeconds(24 + 5, 0), totalYield: 108, totalImportEnergy: 55, totalExportEnergy: 6.5 }
+        ];
+
+        const summaries = dailySummaries(twoDayReadings, config.tariff);
+
+        expect(summaries).toEqual([
+            { date: '2026-07-30', pvYieldKwh: 5, importKwh: 3, exportKwh: 1 },
+            { date: '2026-07-31', pvYieldKwh: 3, importKwh: 2, exportKwh: 0.5 }
+        ]);
+    });
+
+    test('skips a delta across a counter reset', () => {
+        const resetReadings = [
+            { Timestamp: utcSeconds(5, 0), totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5 },
+            // counter reset — totalYield dropped
+            { Timestamp: utcSeconds(6, 0), totalYield: 2, totalImportEnergy: 51, totalExportEnergy: 5 }
+        ];
+
+        const summaries = dailySummaries(resetReadings, config.tariff);
+
+        expect(summaries).toEqual([{ date: '2026-07-30', pvYieldKwh: 0, importKwh: 1, exportKwh: 0 }]);
+    });
+});
+
+describe('ReportFunction parseAiResponse', () => {
+    test('parses a well-formed JSON response', () => {
+        const result = parseAiResponse('{"narrative": "All normal.", "anomalies": ["one thing"]}');
+        expect(result).toEqual({ narrative: 'All normal.', anomalies: ['one thing'] });
+    });
+
+    test('extracts JSON even with surrounding text', () => {
+        const result = parseAiResponse('Sure, here it is:\n{"narrative": "Fine.", "anomalies": []}\nHope that helps!');
+        expect(result).toEqual({ narrative: 'Fine.', anomalies: [] });
+    });
+
+    test('defaults anomalies to an empty array when omitted', () => {
+        const result = parseAiResponse('{"narrative": "Fine."}');
+        expect(result).toEqual({ narrative: 'Fine.', anomalies: [] });
+    });
+
+    test('returns null when there is no narrative field', () => {
+        expect(parseAiResponse('{"anomalies": []}')).toBeNull();
+    });
+
+    test('returns null when the text has no JSON object at all', () => {
+        expect(parseAiResponse('not json')).toBeNull();
     });
 });

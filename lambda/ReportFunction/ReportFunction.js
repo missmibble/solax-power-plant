@@ -3,14 +3,35 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, QueryCommand } = require('@aws-sdk/lib-dynamodb');
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
-const { logInfo, logError, findImportRateWindow, importCostForWindow, exportCredit } = require('powerplant-shared');
+const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+const {
+    logInfo,
+    logError,
+    findImportRateWindow,
+    importCostForWindow,
+    exportCredit,
+    localDateString
+} = require('powerplant-shared');
 
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
 const snsClient = new SNSClient({ region: process.env.AWS_REGION });
+const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 
 const LOOKBACK_DAYS = Number(process.env.REPORT_LOOKBACK_DAYS) || 1;
+const AI_HISTORY_LOOKBACK_DAYS = Number(process.env.AI_HISTORY_LOOKBACK_DAYS) || 14;
 const PEAK_WINDOW_LABEL = 'peak-evening';
 const LOW_SOC_THRESHOLD = 30;
+
+const AI_SYSTEM_PROMPT = `You are an energy analyst for a home solar + battery system. You are given \
+today's usage assessment (import broken down by tariff window, PV yield, export, and battery charge/ \
+discharge/SOC if available) plus a day-by-day summary of the recent history for context. Respond with \
+ONLY a JSON object of the form {"narrative": string, "anomalies": string[]} — no text outside the JSON.
+
+"narrative": 2-4 plain-English sentences assessing today against the recent pattern, and whether the \
+existing recommendation still makes sense in that context.
+"anomalies": notable deviations from the recent pattern (empty array if none) — e.g. an unusual drop in \
+PV yield, an import spike outside the normal pattern, or battery behaviour that differs from recent days. \
+Do not restate ordinary day-to-day variation as an anomaly.`;
 
 // Battery charge/discharge/SOC fields are only present when PollerFunction
 // successfully attached them (it discovers the battery device automatically —
@@ -32,7 +53,8 @@ exports.handler = async () => {
         }
 
         const assessment = assessUsage(readings, tariff);
-        const report = formatReport(assessment, tariff, LOOKBACK_DAYS);
+        const aiInsights = await getAiInsights(assessment, tariff, deviceSn, endSeconds);
+        const report = formatReport(assessment, tariff, LOOKBACK_DAYS, aiInsights);
 
         await snsClient.send(new PublishCommand({
             TopicArn: process.env.REPORTS_TOPIC_ARN,
@@ -128,7 +150,91 @@ function batterySummary(readings, tariff) {
     };
 }
 
-function formatReport(assessment, tariff, lookbackDays) {
+// Groups readings into calendar-day PV yield/import/export deltas (local time,
+// per tariff.timezone) as compact context for the AI insights prompt — sending
+// day totals instead of the raw 5-minute time series keeps the prompt small.
+function dailySummaries(readings, tariff) {
+    const byDate = new Map();
+
+    for (let i = 1; i < readings.length; i++) {
+        const deltaPv = readings[i].totalYield - readings[i - 1].totalYield;
+        const deltaImport = readings[i].totalImportEnergy - readings[i - 1].totalImportEnergy;
+        const deltaExport = readings[i].totalExportEnergy - readings[i - 1].totalExportEnergy;
+
+        const date = localDateString(readings[i].Timestamp, tariff.timezone);
+        const day = byDate.get(date) || { date, pvYieldKwh: 0, importKwh: 0, exportKwh: 0 };
+        // Each counter is checked independently (rather than dropping the whole
+        // interval) so one reset counter doesn't also discard the others' deltas.
+        if (deltaPv > 0) day.pvYieldKwh += deltaPv;
+        if (deltaImport > 0) day.importKwh += deltaImport;
+        if (deltaExport > 0) day.exportKwh += deltaExport;
+        byDate.set(date, day);
+    }
+
+    return [...byDate.values()]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(d => ({
+            date: d.date,
+            pvYieldKwh: round2(d.pvYieldKwh),
+            importKwh: round2(d.importKwh),
+            exportKwh: round2(d.exportKwh)
+        }));
+}
+
+// AI narrative + pattern-based anomaly flags, layered on top of (not replacing)
+// the deterministic recommendation() heuristic above. Never fails the report:
+// a missing model config, a Bedrock error, or an unparsable response all just
+// mean the report goes out without this section.
+async function getAiInsights(assessment, tariff, deviceSn, endSeconds) {
+    const modelId = process.env.BEDROCK_MODEL_ID;
+    if (!modelId) return null;
+
+    try {
+        const historyStart = endSeconds - AI_HISTORY_LOOKBACK_DAYS * 24 * 60 * 60;
+        const historyReadings = await queryReadings(deviceSn, historyStart, endSeconds);
+        const recentDays = dailySummaries(historyReadings, tariff);
+
+        const prompt = JSON.stringify({
+            today: assessment,
+            recentDays,
+            feedInRate: tariff.feedInRate,
+            currency: tariff.currency
+        });
+
+        const response = await bedrockClient.send(new InvokeModelCommand({
+            modelId,
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify({
+                anthropic_version: 'bedrock-2023-05-31',
+                max_tokens: 500,
+                system: AI_SYSTEM_PROMPT,
+                messages: [{ role: 'user', content: prompt }]
+            })
+        }));
+
+        const payload = JSON.parse(new TextDecoder().decode(response.body));
+        return parseAiResponse(payload.content?.[0]?.text || '');
+    } catch (err) {
+        logError('AI insights failed', { error: err.message });
+        return null;
+    }
+}
+
+function parseAiResponse(text) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+
+    const parsed = JSON.parse(match[0]);
+    if (typeof parsed.narrative !== 'string') return null;
+
+    return {
+        narrative: parsed.narrative,
+        anomalies: Array.isArray(parsed.anomalies) ? parsed.anomalies : []
+    };
+}
+
+function formatReport(assessment, tariff, lookbackDays, aiInsights) {
     const lines = [
         `PowerPlant usage report — last ${lookbackDays} day(s)`,
         '',
@@ -154,6 +260,16 @@ function formatReport(assessment, tariff, lookbackDays) {
     lines.push(`Net cost (import - export credit): ${assessment.netCost} ${tariff.currency}`);
     lines.push('');
     lines.push(recommendation(assessment, tariff));
+
+    if (aiInsights) {
+        lines.push('', 'AI insights:', `  ${aiInsights.narrative}`);
+        lines.push('', aiInsights.anomalies.length
+            ? 'Anomalies flagged:'
+            : 'Anomalies flagged: none');
+        for (const anomaly of aiInsights.anomalies) {
+            lines.push(`  - ${anomaly}`);
+        }
+    }
 
     return lines.join('\n');
 }
@@ -195,3 +311,6 @@ function round2(n) {
 
 module.exports.assessUsage = assessUsage;
 module.exports.formatReport = formatReport;
+module.exports.dailySummaries = dailySummaries;
+module.exports.parseAiResponse = parseAiResponse;
+module.exports.getAiInsights = getAiInsights;

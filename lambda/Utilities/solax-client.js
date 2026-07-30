@@ -2,14 +2,15 @@
 
 /**
  * SolaX Cloud OpenAPI client — covers Authentication, Information Management,
- * and Monitoring Management only (docs/solax-apis.md §1, §2, §4).
+ * and Monitoring Management (docs/solax-apis.md §1, §2, §4), plus exactly one
+ * control/write endpoint: §7 Inverter Work Mode Control's Self Use mode
+ * (`batch_set_spontaneity_self_use`), used by BatteryControlFunction to adjust
+ * the grid-charge target based on tomorrow's weather forecast.
  *
- * Deliberately excludes every control/write endpoint (EMS work mode & power
- * controls, export/import limits, inverter work mode control, battery heating,
- * VPP remote control, EV charger control, A1-Hybrid-G2 work mode) — this app
- * only monitors and recommends, it doesn't change device behaviour. Add those
- * later, from docs/solax-apis.md §3 and §6-11, if the app needs to apply its
- * own recommendations automatically.
+ * Every other control/write endpoint (§3 EMS work modes, §6 export/import
+ * limits, §8 battery heating, §9 VPP remote control, §10 EV charger control,
+ * §11 A1-Hybrid-G2 work mode) is still deliberately unimplemented — this app
+ * only monitors/recommends beyond that one exception.
  */
 
 const BASE_URLS = {
@@ -170,6 +171,48 @@ function getDeviceRealtimeData(baseUrl, accessToken, { snList, deviceType, reque
     });
 }
 
+// ─── 7. Inverter Work Mode Control (Self Use only — see file header) ───────
+
+// batch_set_spontaneity_self_use has no read-back counterpart, and this is a
+// full-replace write: every field below is required on every call, not just
+// the one being changed. Callers own supplying a complete, correct object —
+// see BatteryControlFunction.buildSelfUseModeRequest.
+function setInverterSelfUseMode(baseUrl, accessToken, {
+    snList,
+    businessType,
+    minSoc,
+    chargeFromGridEnable,
+    chargeUpperSoc,
+    chargeStartTimePeriod1,
+    chargeEndTimePeriod1,
+    chargeStartTimePeriod2,
+    chargeEndTimePeriod2,
+    dischargeStartTimePeriod1,
+    dischargeEndTimePeriod1,
+    dischargeStartTimePeriod2,
+    dischargeEndTimePeriod2,
+    enableTimePeriod2
+}) {
+    return callApi(baseUrl, accessToken, 'POST', '/openapi/v2/device/inverter_work_mode/batch_set_spontaneity_self_use', {
+        body: {
+            snList: Array.isArray(snList) ? snList : [snList],
+            businessType,
+            minSoc,
+            chargeFromGridEnable,
+            chargeUpperSoc,
+            chargeStartTimePeriod1,
+            chargeEndTimePeriod1,
+            chargeStartTimePeriod2,
+            chargeEndTimePeriod2,
+            dischargeStartTimePeriod1,
+            dischargeEndTimePeriod1,
+            dischargeStartTimePeriod2,
+            dischargeEndTimePeriod2,
+            enableTimePeriod2
+        }
+    });
+}
+
 function getDeviceHistoryData(
     baseUrl,
     accessToken,
@@ -200,5 +243,6 @@ module.exports = {
     getAlarmInfo,
     getPlantStatistics,
     getDeviceRealtimeData,
-    getDeviceHistoryData
+    getDeviceHistoryData,
+    setInverterSelfUseMode
 };

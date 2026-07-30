@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PowerPlant Dashboard</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>PowerPlant</h1>
+  <div class="range-toggle" role="group" aria-label="Date range">
+    <button type="button" class="range-button" data-range="day" aria-pressed="true">Today</button>
+    <button type="button" class="range-button" data-range="week" aria-pressed="false">This week</button>
+  </div>
+</header>
+
+<main>
+  <p id="status" class="status" hidden></p>
+
+  <section id="cards" class="cards" hidden>
+    <div class="card">
+      <span class="card-label">PV Yield</span>
+      <span class="card-value" id="pvYieldKwh">–</span>
+    </div>
+    <div class="card">
+      <span class="card-label">Grid Import</span>
+      <span class="card-value" id="importKwh">–</span>
+      <span class="card-sub" id="importCost">–</span>
+    </div>
+    <div class="card">
+      <span class="card-label">Grid Export</span>
+      <span class="card-value" id="exportKwh">–</span>
+      <span class="card-sub" id="exportCredit">–</span>
+    </div>
+    <div class="card">
+      <span class="card-label">Net Cost</span>
+      <span class="card-value" id="netCost">–</span>
+    </div>
+    <div class="card" id="batteryCard" hidden>
+      <span class="card-label">Battery</span>
+      <span class="card-value" id="batterySOC">–</span>
+      <span class="card-sub" id="batteryChargeDischarge">–</span>
+    </div>
+  </section>
+
+  <section class="chart-wrap" hidden id="chartWrap">
+    <canvas id="energyChart" height="120"></canvas>
+  </section>
+
+  <p id="meta" class="meta"></p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

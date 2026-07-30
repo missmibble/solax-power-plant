@@ -1,0 +1,120 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f8;
+  --fg: #1a1a1a;
+  --card-bg: #ffffff;
+  --border: #e2e2e2;
+  --accent: #f5a623;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --fg: #eaeaea;
+    --card-bg: #1e1e1e;
+    --border: #333;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.range-toggle {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.range-button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.range-button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a1a;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.status {
+  color: #888;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.card-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+}
+
+.card-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.card-sub {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.chart-wrap {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.meta {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+  color: #888;
+  text-align: right;
+}

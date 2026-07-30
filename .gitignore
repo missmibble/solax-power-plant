@@ -15,6 +15,7 @@ config/*.local.json
 .env
 .env.*
 solax-application-creds.txt
+weather-api-key.txt
 
 # Build output
 dist/

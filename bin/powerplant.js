@@ -9,6 +9,7 @@ const { Tags } = require('aws-cdk-lib');
 
 const { InfrastructureStack } = require('../lib/infrastructure-stack');
 const { LambdaFunctionsStack } = require('../lib/lambda-functions-stack');
+const { DashboardStack } = require('../lib/dashboard-stack');
 
 // ─── Load config ─────────────────────────────────────────────────────────────
 // dev-powerplant.json (tracked, public) holds only placeholder values — it's
@@ -46,6 +47,23 @@ function loadSolaxCredentials() {
 
 const solaxCredentials = loadSolaxCredentials();
 
+// ─── Load OpenWeatherMap API key (one-time SSM seed) ──────────────────────────
+// weather-api-key.txt is gitignored, same pattern as solax-application-creds.txt.
+
+function loadWeatherApiKey() {
+    const keyPath = path.join(__dirname, '..', 'weather-api-key.txt');
+    if (!fs.existsSync(keyPath)) {
+        return null;
+    }
+
+    const content = fs.readFileSync(keyPath, 'utf8');
+    const apiKey = content.match(/^API Key:\s*(.+)$/m)?.[1]?.trim();
+
+    return apiKey || null;
+}
+
+const weatherApiKey = loadWeatherApiKey();
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 const app = new cdk.App();
@@ -56,13 +74,14 @@ const env = {
 };
 
 // ─── Stack 1: Infrastructure ──────────────────────────────────────────────────
-// Core stateful resources: DynamoDB time-series table, S3 dashboard bucket,
-// SNS topics, and the SolaX OAuth credential SSM parameters.
+// Core stateful resources: DynamoDB time-series table, SNS topics, and the
+// SolaX OAuth credential SSM parameters.
 
 const infraStack = new InfrastructureStack(app, 'PowerPlantInfrastructureStack', {
     env,
     config,
     solaxCredentials,
+    weatherApiKey,
     description: 'powerplant: Core infrastructure — DynamoDB, S3, SNS, SSM'
 });
 
@@ -82,9 +101,30 @@ const lambdaStack = new LambdaFunctionsStack(app, 'PowerPlantLambdaFunctionsStac
 
 lambdaStack.addStackDependency(infraStack);
 
+// ─── Stack 3: Dashboard (S3 + CloudFront) ─────────────────────────────────────
+// Owns its own S3 bucket (not stack 1's) and depends only on stack 2, for the
+// RestApi — see lib/dashboard-stack.js for why the bucket can't live in
+// InfrastructureStack instead. Skipped entirely against the public template
+// config, since its placeholder apiKeyValue can't satisfy API Gateway's
+// key-value requirements meaningfully.
+
+const stacks = [infraStack, lambdaStack];
+
+if (config.api.apiKeyValue && !config.api.apiKeyValue.startsWith('TODO_')) {
+    const dashboardStack = new DashboardStack(app, 'PowerPlantDashboardStack', {
+        env,
+        config,
+        api: lambdaStack.api,
+        description: 'powerplant: S3 + CloudFront dashboard in front of the DashboardApiFunction'
+    });
+
+    dashboardStack.addStackDependency(lambdaStack);
+    stacks.push(dashboardStack);
+}
+
 // ─── Tags ─────────────────────────────────────────────────────────────────────
 
 const tags = config.tags || {};
-[infraStack, lambdaStack].forEach(stack => {
+stacks.forEach(stack => {
     Object.entries(tags).forEach(([key, value]) => Tags.of(stack).add(key, value));
 });

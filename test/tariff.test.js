@@ -2,11 +2,14 @@
 
 const fs = require('fs');
 const path = require('path');
-const { findImportRateWindow, importCostForWindow, exportCredit } = require('../lambda/Utilities/tariff');
+const { findImportRateWindow, importCostForWindow, exportCredit, localDateString } = require('../lambda/Utilities/tariff');
 
 const config = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'config', 'dev-powerplant.json'), 'utf8')
 );
+// Timezone lives with the site location (config.location), not duplicated in
+// config.tariff — see lib/lambda-functions-stack.js's tariffStructure.
+config.tariff.timezone = config.location.timezone;
 
 // 2026-07-30 is Australian winter — no DST — so Australia/Sydney is a fixed
 // UTC+10 for every timestamp below, making local-time arithmetic predictable.
@@ -59,6 +62,17 @@ describe('tariff', () => {
 
         test('returns 0 when feedInRate is missing', () => {
             expect(exportCredit({ importRates: [] }, 5)).toBe(0);
+        });
+    });
+
+    describe('localDateString', () => {
+        test('renders a sortable YYYY-MM-DD in the tariff timezone', () => {
+            expect(localDateString(utcSeconds(23, 30), tariff.timezone)).toBe('2026-07-30');
+        });
+
+        test('rolls over to the next local day just after midnight', () => {
+            // utcSeconds(24, 5) is 00:05 local on 2026-07-31
+            expect(localDateString(utcSeconds(24, 5), tariff.timezone)).toBe('2026-07-31');
         });
     });
 });
