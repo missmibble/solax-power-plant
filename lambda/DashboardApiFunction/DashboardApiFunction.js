@@ -3,7 +3,9 @@
 const { logInfo, logError } = require('powerplant-shared');
 
 // TODO: query ENERGY_READINGS_TABLE (DeviceSn + Timestamp range) and aggregate
-// into daily/weekly rollups (PV yield, import/export, battery charge/discharge, SOC).
+// into daily/weekly rollups (PV yield, import/export, battery charge/discharge,
+// SOC). TARIFF_STRUCTURE env var (JSON — see ReportFunction.js) has the
+// time-of-day import rates for computing cost per rollup period.
 
 exports.handler = async (event) => {
     logInfo('DashboardApiFunction invoked', { path: event.path });

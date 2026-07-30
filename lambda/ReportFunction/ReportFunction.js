@@ -6,7 +6,11 @@ const { logInfo, logError } = require('powerplant-shared');
 // patterns (PV yield, import/export timing, battery charge/discharge, SOC), and
 // recommend battery configuration optimizations (e.g. charge window, capacity,
 // discharge threshold) against the known tariff structure — see
-// PowerPlant_Project_Brief.md. Publish the resulting report to REPORTS_TOPIC_ARN.
+// PowerPlant_Project_Brief.md. TARIFF_STRUCTURE env var holds the full tariff
+// as JSON ({ currency, importRates: [{ label, startTime, endTime, rate }],
+// feedInRate }) — both import rates and feedInRate (0.02) are now known, so
+// cost/savings can be computed directly. Publish the resulting report to
+// REPORTS_TOPIC_ARN.
 
 exports.handler = async (event) => {
     logInfo('ReportFunction invoked', { event });

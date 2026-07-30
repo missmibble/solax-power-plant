@@ -51,6 +51,17 @@
     "deviceType": 1,
     "inverterSn": "TODO_INVERTER_SN"
   },
+  "tariff": {
+    "currency": "AUD",
+    "importRates": [
+      { "label": "night-ev-charge", "startTime": "00:00", "endTime": "06:00", "rate": 0.08 },
+      { "label": "shoulder-morning", "startTime": "06:00", "endTime": "09:00", "rate": 0.32384 },
+      { "label": "offpeak-midday", "startTime": "09:00", "endTime": "16:00", "rate": 0.20141 },
+      { "label": "peak-evening", "startTime": "16:00", "endTime": "21:00", "rate": 0.41756 },
+      { "label": "shoulder-night", "startTime": "21:00", "endTime": "24:00", "rate": 0.32384 }
+    ],
+    "feedInRate": 0.02
+  },
   "ssm": {
     "solaxClientId": {
       "parameterName": "/powerplant/solax/client-id",

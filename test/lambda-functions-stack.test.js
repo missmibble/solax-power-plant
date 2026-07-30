@@ -75,4 +75,18 @@ describe('LambdaFunctionsStack', () => {
             }
         });
     });
+
+    test('DashboardApiFunction and ReportFunction get the tariff structure as an env var', () => {
+        const tariffJson = JSON.stringify(config.tariff);
+
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.dashboardApiFunction.functionName,
+            Environment: { Variables: Match.objectLike({ TARIFF_STRUCTURE: tariffJson }) }
+        });
+
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.reportFunction.functionName,
+            Environment: { Variables: Match.objectLike({ TARIFF_STRUCTURE: tariffJson }) }
+        });
+    });
 });

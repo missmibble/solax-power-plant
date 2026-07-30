@@ -23,7 +23,7 @@ This home recently had a battery added to its existing solar system.
 
 **Daily 5-min interval report (29 July 2026)** showed *why* import looked high: nearly all grid import (28 of 28.1 kWh) happens between midnight and 6am, then flatlines for the rest of the day. This is deliberate — the household charges the battery (and sometimes the EV) overnight on an **8c/kWh off-peak rate**, then runs on solar + battery for the rest of the day, exporting surplus once the battery is full. The "high import" figure in the monthly view is cheap scheduled charging, not a shortfall.
 
-**Open question:** compare the cost of overnight charging vs. the value of avoided daytime import (need peak/shoulder import rate and feed-in tariff rate to calculate this properly).
+**Resolved:** the full tariff structure (import rates + feed-in rate) is now known — see Tariff details below — so this cost/savings comparison can be calculated once `ReportFunction`/`DashboardApiFunction` are implemented.
 
 ## Goal
 
@@ -59,6 +59,18 @@ The full API reference is in `solax-apis.md` (not a secret, kept in the repo) �
 
 ## Tariff details known so far
 
-- Off-peak import: 8c/kWh, midnight–6am
-- Peak/shoulder import rate: not yet provided
-- Feed-in tariff: not yet provided
+Import rates (AUD/kWh) by time-of-day window:
+
+| Window | Label | Rate ($/kWh) |
+|---|---|---|
+| 00:00–06:00 | Night / EV charge | 0.08 |
+| 06:00–09:00 | Shoulder | 0.32384 |
+| 09:00–16:00 | Off-peak | 0.20141 |
+| 16:00–21:00 | Peak | 0.41756 |
+| 21:00–24:00 | Shoulder | 0.32384 |
+
+**Feed-in tariff: 0.02 $/kWh** (flat, all export).
+
+This confirms the earlier open question: the household's overnight charging (0.08) is indeed far cheaper than any daytime rate, including the 09:00–16:00 solar-hours window (0.20141) — so running the battery down before that window and refilling from solar makes sense. And with feed-in this low (0.02) against a 0.41756 peak import rate, holding battery charge through 16:00–21:00 rather than exporting surplus earlier is clearly the highest-value target for battery configuration — exporting during that window instead of self-consuming would cost roughly 20x the feed-in credit in avoided-import terms.
+
+Kept in `config/dev-powerplant.json`'s `tariff` block (`importRates` + `feedInRate`, safe to publish — these are the retailer's public rates, not account-specific) for `ReportFunction`/`DashboardApiFunction` to use once implemented.
