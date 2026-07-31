@@ -44,6 +44,7 @@ const els = {
   weatherReasoning: document.getElementById('weatherReasoning'),
   batteryDecisionWidget: document.getElementById('batteryDecisionWidget'),
   batteryChargeTarget: document.getElementById('batteryChargeTarget'),
+  batteryDecisionAppliesTo: document.getElementById('batteryDecisionAppliesTo'),
   batteryDecisionMeta: document.getElementById('batteryDecisionMeta'),
   batteryStatusStatus: document.getElementById('batteryStatusStatus'),
   insightsSection: document.getElementById('insightsSection'),
@@ -446,6 +447,10 @@ function renderBatteryStatus(data) {
     els.batteryDecisionWidget.hidden = false;
   }
 
+  els.batteryDecisionAppliesTo.textContent = data.appliesToDate
+    ? `Applies from ${formatAppliesToDate(data.appliesToDate)}`
+    : '';
+
   if (data.previousAssessment) {
     els.previousAssessmentAccurate.textContent = data.previousAssessment.accurate ? '✓ On target' : '✗ Off target';
     els.previousAssessmentText.textContent = data.previousAssessment.usageShouldInfluence
@@ -526,6 +531,18 @@ els.runAssessmentButton.addEventListener('click', async () => {
 
 function formatTime(epochSeconds) {
   return new Date(epochSeconds * 1000).toLocaleString();
+}
+
+// dateStr is a plain "YYYY-MM-DD" calendar date (BatteryControlFunction's
+// appliesToDate, computed in the site's local timezone), not a timestamp —
+// built via the Date(year, month, day) local-components constructor rather
+// than new Date(dateStr), which parses date-only ISO strings as UTC midnight
+// and can display as the wrong day once shifted to the viewer's local time.
+function formatAppliesToDate(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short'
+  });
 }
 
 async function init() {

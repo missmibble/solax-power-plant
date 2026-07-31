@@ -1,5 +1,7 @@
 'use strict';
 
+const { localDateString } = require('../lambda/Utilities/tariff');
+
 const mockSsmSend = jest.fn();
 const mockSnsSend = jest.fn();
 const mockDynamoSend = jest.fn();
@@ -181,7 +183,7 @@ describe('BatteryControlFunction', () => {
         test('prefixes DeviceSn with BATTERY_STATUS_RECORD_PREFIX so it cannot collide with a real device serial', () => {
             const record = buildBatteryStatusRecord('H34ABCDEFG5001', 1785400000, {
                 classification: 'sunny', reasoning: 'maxPop=0.05', chargeUpperSoc: 40,
-                dryRun: true, applied: false, enabled: true, previousAssessment: null
+                dryRun: true, applied: false, enabled: true, appliesToDate: '2026-08-01', previousAssessment: null
             });
 
             expect(record.DeviceSn).toBe(`${BATTERY_STATUS_RECORD_PREFIX}H34ABCDEFG5001`);
@@ -192,6 +194,7 @@ describe('BatteryControlFunction', () => {
             expect(record.dryRun).toBe(true);
             expect(record.applied).toBe(false);
             expect(record.enabled).toBe(true);
+            expect(record.appliesToDate).toBe('2026-08-01');
             expect(record.previousAssessment).toBeNull();
         });
 
@@ -309,6 +312,9 @@ describe('BatteryControlFunction', () => {
             expect(putCall.input.Item.dryRun).toBe(true);
             expect(putCall.input.Item.applied).toBe(false);
             expect(putCall.input.Item.enabled).toBe(true);
+            expect(putCall.input.Item.appliesToDate).toBe(
+                localDateString(Math.floor(Date.now() / 1000) + 24 * 60 * 60, 'UTC')
+            );
         });
     });
 
@@ -388,6 +394,9 @@ describe('BatteryControlFunction', () => {
             expect(putCall.input.Item.chargeUpperSoc).toBe(100); // BASELINE_CONFIG.disabledChargeUpperSoc
             expect(putCall.input.Item.dryRun).toBe(true);
             expect(putCall.input.Item.applied).toBe(false);
+            expect(putCall.input.Item.appliesToDate).toBe(
+                localDateString(Math.floor(Date.now() / 1000) + 24 * 60 * 60, 'UTC')
+            );
         });
 
         test('applies the disabled default chargeUpperSoc to the inverter when disabled and not a dry run', async () => {

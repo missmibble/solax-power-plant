@@ -180,6 +180,7 @@ function formatBatteryStatusResponse(item, currentWeather) {
         dryRun: item.dryRun,
         applied: item.applied,
         enabled: item.enabled ?? true,
+        appliesToDate: item.appliesToDate || null,
         previousAssessment: item.previousAssessment || null
     };
 }

@@ -189,6 +189,7 @@ describe('DashboardApiFunction formatBatteryStatusResponse', () => {
             dryRun: true,
             applied: false,
             enabled: true,
+            appliesToDate: '2026-08-01',
             previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
         };
         const currentWeather = { tempC: 18, description: 'few clouds' };
@@ -203,8 +204,14 @@ describe('DashboardApiFunction formatBatteryStatusResponse', () => {
             dryRun: true,
             applied: false,
             enabled: true,
+            appliesToDate: '2026-08-01',
             previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
         });
+    });
+
+    test('defaults appliesToDate to null when the record predates that field', () => {
+        const item = { Timestamp: 1785400000, classification: 'sunny', chargeUpperSoc: 40, dryRun: true, applied: false };
+        expect(formatBatteryStatusResponse(item).appliesToDate).toBeNull();
     });
 
     test('defaults currentWeather to null when the current-weather lookup failed or is unconfigured', () => {

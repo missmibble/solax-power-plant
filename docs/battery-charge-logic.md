@@ -10,7 +10,7 @@ Today, the household manually sets the inverter's grid-charge target (`chargeUpp
 
 Nightly at **20:00 Brisbane time** (`cron(0 10 * * ? *)` — 10:00 UTC; Queensland doesn't observe DST, so this is a fixed offset year-round, no seasonal drift). This is deliberately *before* the 00:00–06:00 overnight charge window starts, so whatever `chargeUpperSoc` it decides on is in place before grid-charging begins that night.
 
-"Tomorrow" is computed as the calendar date following the current one, in `Australia/Brisbane` local time, at the moment the function runs (~20:00) — i.e., the day that starts right after tonight's charge window ends.
+"Tomorrow" is computed as the calendar date following the current one, in `Australia/Brisbane` local time, at the moment the function runs (~20:00) — i.e., the day that starts right after tonight's charge window ends. That same date is stored on the status record as `appliesToDate` (via `tariff.localDateString`, the same helper `fetchTomorrowForecastSlots` uses to filter forecast slots) and shown on the dashboard's "Charge decision" widget as "Applies from &lt;date&gt;" — computed identically regardless of whether the run was a real forecast decision or the disabled-toggle default, since both take effect at the same overnight window.
 
 ## Data sources
 
