@@ -2,6 +2,9 @@
 
 const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const {
     logInfo,
     logError,
@@ -13,6 +16,30 @@ const {
 
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION });
 const snsClient = new SNSClient({ region: process.env.AWS_REGION });
+const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
+const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
+
+// Shares the readings table with sentinel DeviceSn prefixes (same pattern as
+// ReportFunction.REPORT_RECORD_PREFIX) — DashboardApiFunction's /battery-status
+// and /battery-settings routes read/write these same prefixes.
+const BATTERY_STATUS_RECORD_PREFIX = 'BATTERY_CONTROL#';
+const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
+const SETTINGS_TIMESTAMP = 0; // fixed sort key — one settings row per inverter, not time-series
+
+const ACCURACY_SYSTEM_PROMPT = `You are reviewing a home battery charge-control decision made yesterday \
+evening for a solar + battery system. You are given yesterday's decision (forecast classification, the \
+reasoning, and the chargeUpperSoc percent that was set) and a summary of today's actual usage (PV yield, \
+grid import/export, and battery SOC range if available). Respond with ONLY a JSON object of the form \
+{"accurate": boolean, "assessment": string, "usageShouldInfluence": boolean, "usageNote": string} — no text \
+outside the JSON.
+
+"accurate": whether the chargeUpperSoc looks right in hindsight given what actually happened.
+"assessment": 1-2 plain-English sentences explaining the accuracy judgement — e.g. did the battery run flat \
+before solar caught up (target was too low), or stay needlessly full all day (target was too high)?
+"usageShouldInfluence": whether today's usage pattern (not just weather) suggests the charge target should \
+account for household load, independent of tomorrow's forecast.
+"usageNote": 1 sentence on what about today's usage drove that judgement (e.g. unusually high overnight \
+load) — empty string if usageShouldInfluence is false.`;
 
 let cachedCredentials = null; // reused across warm invocations, same pattern as PollerFunction
 let cachedWeatherApiKey = null;
@@ -148,10 +175,202 @@ async function publish(topicArn, subject, message) {
     await snsClient.send(new PublishCommand({ TopicArn: topicArn, Subject: subject, Message: message }));
 }
 
+function buildBatteryStatusRecord(deviceSn, timestampSeconds, fields) {
+    return {
+        DeviceSn: `${BATTERY_STATUS_RECORD_PREFIX}${deviceSn}`,
+        Timestamp: timestampSeconds,
+        classification: fields.classification,
+        reasoning: fields.reasoning,
+        chargeUpperSoc: fields.chargeUpperSoc,
+        dryRun: fields.dryRun,
+        applied: fields.applied,
+        enabled: fields.enabled,
+        previousAssessment: fields.previousAssessment || null
+    };
+}
+
+// Best-effort, same as ReportFunction's report record write — the dashboard
+// widget just shows the last successfully stored decision if this fails, so
+// it never turns a successful dry-run/apply into a Lambda error.
+async function storeBatteryStatusRecord(record) {
+    try {
+        await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: record }));
+    } catch (err) {
+        logError('Failed to store battery status record for the dashboard', { error: err.message });
+    }
+}
+
+// Dashboard-editable overrides for chargeUpperSocSunny/Overcast and the on/off
+// switch — a single fixed-key row (SETTINGS_TIMESTAMP), not time-series, so a
+// dashboard save always upserts the same item. Falls back to config.batteryControl's
+// static values when nothing's been saved yet — never fails the run either way.
+async function loadSettingsOverride(deviceSn) {
+    try {
+        const result = await docClient.send(new GetCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            Key: { DeviceSn: `${BATTERY_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP }
+        }));
+        return result.Item || null;
+    } catch (err) {
+        logError('Failed to load battery control settings override', { error: err.message });
+        return null;
+    }
+}
+
+function resolveEffectiveSettings(batteryControlConfig, override) {
+    return {
+        enabled: override?.enabled ?? true,
+        chargeUpperSocSunny: override?.chargeUpperSocSunny ?? batteryControlConfig.chargeUpperSocSunny,
+        chargeUpperSocOvercast: override?.chargeUpperSocOvercast ?? batteryControlConfig.chargeUpperSocOvercast
+    };
+}
+
+// Reads the last stored decision (before this run's) plus the readings since
+// then, and asks Bedrock whether that decision looks right in hindsight, and
+// whether usage (not just weather) should have factored in. Additive, same
+// graceful-degradation pattern as ReportFunction.getAiInsights — no model
+// configured, a Bedrock error, an unparsable response, or simply not enough
+// history yet all just mean tonight's record has no previousAssessment field,
+// never a failed run.
+async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
+    const modelId = process.env.BEDROCK_MODEL_ID;
+    if (!modelId) return null;
+
+    try {
+        const previous = await queryPreviousStatusRecord(deviceSn, beforeTimestamp);
+        if (!previous || !previous.classification) return null; // nothing to assess yet, or last run was a disabled skip
+
+        const readings = await queryReadingsSince(deviceSn, previous.Timestamp, beforeTimestamp);
+        if (readings.length < 2) return null;
+
+        const usageSummary = summarizeUsage(readings);
+
+        const prompt = JSON.stringify({
+            yesterdaysDecision: {
+                classification: previous.classification,
+                reasoning: previous.reasoning,
+                chargeUpperSoc: previous.chargeUpperSoc,
+                applied: previous.applied
+            },
+            todaysUsage: usageSummary,
+            currency: tariff.currency
+        });
+
+        const response = await bedrockClient.send(new InvokeModelCommand({
+            modelId,
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify({
+                anthropic_version: 'bedrock-2023-05-31',
+                max_tokens: 400,
+                system: ACCURACY_SYSTEM_PROMPT,
+                messages: [{ role: 'user', content: prompt }]
+            })
+        }));
+
+        const payload = JSON.parse(new TextDecoder().decode(response.body));
+        return parseAccuracyAssessment(payload.content?.[0]?.text || '');
+    } catch (err) {
+        logError('Previous-decision assessment failed', { error: err.message });
+        return null;
+    }
+}
+
+async function queryPreviousStatusRecord(deviceSn, beforeTimestamp) {
+    const result = await docClient.send(new QueryCommand({
+        TableName: process.env.ENERGY_READINGS_TABLE,
+        KeyConditionExpression: 'DeviceSn = :sn AND #ts < :before',
+        ExpressionAttributeNames: { '#ts': 'Timestamp' },
+        ExpressionAttributeValues: { ':sn': `${BATTERY_STATUS_RECORD_PREFIX}${deviceSn}`, ':before': beforeTimestamp },
+        ScanIndexForward: false,
+        Limit: 1
+    }));
+    return result.Items?.[0] || null;
+}
+
+async function queryReadingsSince(deviceSn, startSeconds, endSeconds) {
+    const readings = [];
+    let exclusiveStartKey;
+
+    do {
+        const result = await docClient.send(new QueryCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            KeyConditionExpression: 'DeviceSn = :sn AND #ts BETWEEN :start AND :end',
+            ExpressionAttributeNames: { '#ts': 'Timestamp' },
+            ExpressionAttributeValues: { ':sn': deviceSn, ':start': startSeconds, ':end': endSeconds },
+            ExclusiveStartKey: exclusiveStartKey
+        }));
+
+        readings.push(...(result.Items || []));
+        exclusiveStartKey = result.LastEvaluatedKey;
+    } while (exclusiveStartKey);
+
+    return readings;
+}
+
+function summarizeUsage(readings) {
+    const first = readings[0];
+    const last = readings[readings.length - 1];
+
+    const summary = {
+        pvYieldKwh: round2(last.totalYield - first.totalYield),
+        importKwh: round2(last.totalImportEnergy - first.totalImportEnergy),
+        exportKwh: round2(last.totalExportEnergy - first.totalExportEnergy)
+    };
+
+    const socs = readings.map(r => r.batterySOC).filter(v => typeof v === 'number');
+    if (socs.length) {
+        summary.minBatterySOC = Math.min(...socs);
+        summary.maxBatterySOC = Math.max(...socs);
+    }
+
+    return summary;
+}
+
+function parseAccuracyAssessment(text) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+
+    const parsed = JSON.parse(match[0]);
+    if (typeof parsed.accurate !== 'boolean' || typeof parsed.assessment !== 'string') return null;
+
+    return {
+        accurate: parsed.accurate,
+        assessment: parsed.assessment,
+        usageShouldInfluence: Boolean(parsed.usageShouldInfluence),
+        usageNote: typeof parsed.usageNote === 'string' ? parsed.usageNote : ''
+    };
+}
+
+function round2(n) {
+    return Math.round(n * 100) / 100;
+}
+
 exports.handler = async () => {
     try {
         const batteryControlConfig = JSON.parse(process.env.BATTERY_CONTROL_CONFIG);
         const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const nowSeconds = Math.floor(Date.now() / 1000);
+
+        const settingsOverride = await loadSettingsOverride(deviceSn);
+        const effective = resolveEffectiveSettings(batteryControlConfig, settingsOverride);
+        const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds);
+
+        if (!effective.enabled) {
+            logInfo('Battery control disabled via dashboard settings — skipping this run');
+            await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
+                classification: null,
+                reasoning: 'Automation disabled via dashboard settings.',
+                chargeUpperSoc: null,
+                dryRun: null,
+                applied: false,
+                enabled: false,
+                previousAssessment
+            }));
+            return { statusCode: 200 };
+        }
+
         const dryRun = batteryControlConfig.dryRun !== false;
 
         const weatherApiKey = await loadWeatherApiKey();
@@ -160,8 +379,8 @@ exports.handler = async () => {
         );
         const { classification, reasoning } = classifyForecast(slots);
         const chargeUpperSoc = classification === 'sunny'
-            ? batteryControlConfig.chargeUpperSocSunny
-            : batteryControlConfig.chargeUpperSocOvercast;
+            ? effective.chargeUpperSocSunny
+            : effective.chargeUpperSocOvercast;
 
         const requestBody = buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc);
 
@@ -172,6 +391,9 @@ exports.handler = async () => {
                 'PowerPlant battery control — DRY RUN (no change applied)',
                 formatMessage(classification, reasoning, requestBody, true)
             );
+            await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
+                classification, reasoning, chargeUpperSoc, dryRun: true, applied: false, enabled: true, previousAssessment
+            }));
             return { statusCode: 200 };
         }
 
@@ -192,6 +414,9 @@ exports.handler = async () => {
             'PowerPlant battery control — applied',
             formatMessage(classification, reasoning, requestBody, false)
         );
+        await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
+            classification, reasoning, chargeUpperSoc, dryRun: false, applied: true, enabled: true, previousAssessment
+        }));
         return { statusCode: 200 };
     } catch (err) {
         logError('Battery control failed', { error: err.message });
@@ -210,3 +435,10 @@ exports.handler = async () => {
 
 module.exports.classifyForecast = classifyForecast;
 module.exports.buildSelfUseModeRequest = buildSelfUseModeRequest;
+module.exports.buildBatteryStatusRecord = buildBatteryStatusRecord;
+module.exports.resolveEffectiveSettings = resolveEffectiveSettings;
+module.exports.summarizeUsage = summarizeUsage;
+module.exports.parseAccuracyAssessment = parseAccuracyAssessment;
+module.exports.BATTERY_STATUS_RECORD_PREFIX = BATTERY_STATUS_RECORD_PREFIX;
+module.exports.BATTERY_SETTINGS_PREFIX = BATTERY_SETTINGS_PREFIX;
+module.exports.SETTINGS_TIMESTAMP = SETTINGS_TIMESTAMP;

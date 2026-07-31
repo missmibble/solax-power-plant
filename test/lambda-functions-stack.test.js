@@ -25,7 +25,8 @@ describe('LambdaFunctionsStack', () => {
             config,
             energyReadingsTable: infraStack.energyReadingsTable,
             alertsTopic: infraStack.alertsTopic,
-            reportsTopic: infraStack.reportsTopic
+            reportsTopic: infraStack.reportsTopic,
+            userPool: infraStack.userPool
         });
 
         template = Template.fromStack(lambdaStack);
@@ -147,6 +148,117 @@ describe('LambdaFunctionsStack', () => {
                     Match.objectLike({ Action: 'sns:Publish' })
                 ])
             }
+        });
+    });
+
+    test('ReportFunction role can write to the energy readings table (for its report record)', () => {
+        template.hasResourceProperties('AWS::IAM::Policy', {
+            PolicyName: Match.stringLikeRegexp('ReportFunction'),
+            PolicyDocument: {
+                Statement: Match.arrayWith([
+                    Match.objectLike({
+                        Action: Match.arrayWith(['dynamodb:PutItem'])
+                    })
+                ])
+            }
+        });
+    });
+
+    test('creates /insights and /battery-status API resources alongside /readings', () => {
+        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'insights' });
+        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'battery-status' });
+    });
+
+    test('creates a Cognito app client with no client secret (public client for browser JS)', () => {
+        template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+            GenerateSecret: false,
+            ExplicitAuthFlows: Match.arrayWith(['ALLOW_USER_PASSWORD_AUTH'])
+        });
+    });
+
+    test('GET /readings, /insights, and /battery-status all require Cognito authorization', () => {
+        const methods = template.findResources('AWS::ApiGateway::Method', {
+            Properties: { HttpMethod: 'GET', AuthorizationType: 'COGNITO_USER_POOLS' }
+        });
+        expect(Object.keys(methods).length).toBeGreaterThanOrEqual(3);
+    });
+
+    test('creates a /battery-settings API resource with GET and PUT methods', () => {
+        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'battery-settings' });
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'PUT',
+            AuthorizationType: 'COGNITO_USER_POOLS'
+        });
+    });
+
+    test('POST /insights (manual assessment trigger) requires Cognito authorization', () => {
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'POST',
+            AuthorizationType: 'COGNITO_USER_POOLS'
+        });
+    });
+
+    test('BatteryControlFunction gets the readings table name as an env var', () => {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.batteryControlFunction.functionName,
+            Environment: { Variables: Match.objectLike({ ENERGY_READINGS_TABLE: Match.anyValue() }) }
+        });
+    });
+
+    test('BatteryControlFunction role can read and write the energy readings table', () => {
+        const policies = template.findResources('AWS::IAM::Policy', {
+            Properties: { PolicyName: Match.stringLikeRegexp('BatteryControlFunction') }
+        });
+        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
+        const dynamoStatement = statements.find(s => s.Action?.includes?.('dynamodb:PutItem'));
+
+        expect(dynamoStatement).toBeDefined();
+        expect(dynamoStatement.Action).toEqual(expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem']));
+    });
+
+    test('BatteryControlFunction role can invoke Bedrock when a model is configured', () => {
+        template.hasResourceProperties('AWS::IAM::Policy', {
+            PolicyName: Match.stringLikeRegexp('BatteryControlFunction'),
+            PolicyDocument: {
+                Statement: Match.arrayWith([
+                    Match.objectLike({ Action: 'bedrock:InvokeModel' })
+                ])
+            }
+        });
+    });
+
+    test('DashboardApiFunction role can write to the energy readings table (for settings saves)', () => {
+        template.hasResourceProperties('AWS::IAM::Policy', {
+            PolicyName: Match.stringLikeRegexp('DashboardApiFunction'),
+            PolicyDocument: {
+                Statement: Match.arrayWith([
+                    Match.objectLike({
+                        Action: Match.arrayWith(['dynamodb:PutItem'])
+                    })
+                ])
+            }
+        });
+    });
+
+    test('DashboardApiFunction role can invoke ReportFunction (manual assessment trigger)', () => {
+        template.hasResourceProperties('AWS::IAM::Policy', {
+            PolicyName: Match.stringLikeRegexp('DashboardApiFunction'),
+            PolicyDocument: {
+                Statement: Match.arrayWith([
+                    Match.objectLike({ Action: 'lambda:InvokeFunction' })
+                ])
+            }
+        });
+    });
+
+    test('schedules a 6x/day ReportFunction refresh (sendEmail: false) separate from the nightly rule', () => {
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.reportFunction.refreshSchedule,
+            Targets: Match.arrayWith([
+                Match.objectLike({
+                    Input: JSON.stringify({ sendEmail: false })
+                })
+            ])
         });
     });
 });

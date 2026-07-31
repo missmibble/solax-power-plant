@@ -2,7 +2,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { aggregateReadings } = require('../lambda/DashboardApiFunction/DashboardApiFunction');
+const {
+    aggregateReadings,
+    formatInsightsResponse,
+    formatBatteryStatusResponse,
+    formatBatterySettingsResponse,
+    validateBatterySettings
+} = require('../lambda/DashboardApiFunction/DashboardApiFunction');
 
 const config = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'config', 'dev-powerplant.json'), 'utf8')
@@ -85,5 +91,134 @@ describe('DashboardApiFunction aggregateReadings', () => {
         expect(rollup.batteryChargeKwh).toBeCloseTo(1, 5);
         expect(rollup.batteryDischargeKwh).toBeCloseTo(2.5, 5);
         expect(rollup.currentBatterySOC).toBe(30);
+    });
+});
+
+describe('DashboardApiFunction formatInsightsResponse', () => {
+    test('reports unavailable when no report record exists yet', () => {
+        expect(formatInsightsResponse(null)).toEqual({ available: false });
+    });
+
+    test('shapes a stored report record into the API response', () => {
+        const item = {
+            DeviceSn: 'REPORT#H34ABCDEFG5001',
+            Timestamp: 1785400000,
+            lookbackDays: 1,
+            assessment: { pvYieldKwh: 5, netCost: 1.14 },
+            recommendation: 'Recommendation: hold charge into peak.',
+            aiInsights: { narrative: 'All normal.', anomalies: [] }
+        };
+
+        expect(formatInsightsResponse(item)).toEqual({
+            available: true,
+            generatedAt: 1785400000,
+            lookbackDays: 1,
+            assessment: { pvYieldKwh: 5, netCost: 1.14 },
+            recommendation: 'Recommendation: hold charge into peak.',
+            aiInsights: { narrative: 'All normal.', anomalies: [] }
+        });
+    });
+
+    test('defaults aiInsights to null when the report has none', () => {
+        const item = {
+            Timestamp: 1785400000,
+            lookbackDays: 1,
+            assessment: {},
+            recommendation: 'Recommendation: no significant peak-window import detected.'
+        };
+
+        expect(formatInsightsResponse(item).aiInsights).toBeNull();
+    });
+});
+
+describe('DashboardApiFunction formatBatteryStatusResponse', () => {
+    test('reports unavailable when no battery status record exists yet', () => {
+        expect(formatBatteryStatusResponse(null)).toEqual({ available: false });
+    });
+
+    test('shapes a stored battery status record into the API response', () => {
+        const item = {
+            DeviceSn: 'BATTERY_CONTROL#H34ABCDEFG5001',
+            Timestamp: 1785400000,
+            classification: 'sunny',
+            reasoning: 'maxPop=0.05, avgClouds=10%',
+            chargeUpperSoc: 40,
+            dryRun: true,
+            applied: false,
+            enabled: true,
+            previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
+        };
+
+        expect(formatBatteryStatusResponse(item)).toEqual({
+            available: true,
+            decidedAt: 1785400000,
+            classification: 'sunny',
+            reasoning: 'maxPop=0.05, avgClouds=10%',
+            chargeUpperSoc: 40,
+            dryRun: true,
+            applied: false,
+            enabled: true,
+            previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
+        });
+    });
+
+    test('defaults enabled to true and previousAssessment to null when the record predates those fields', () => {
+        const item = { Timestamp: 1785400000, classification: 'sunny', chargeUpperSoc: 40, dryRun: true, applied: false };
+        const response = formatBatteryStatusResponse(item);
+        expect(response.enabled).toBe(true);
+        expect(response.previousAssessment).toBeNull();
+    });
+});
+
+describe('DashboardApiFunction formatBatterySettingsResponse', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+        process.env = { ...originalEnv, BATTERY_CONTROL_DEFAULT_SUNNY: '40', BATTERY_CONTROL_DEFAULT_OVERCAST: '100' };
+    });
+
+    afterEach(() => {
+        process.env = originalEnv;
+    });
+
+    test('falls back to the config defaults when no override has been saved', () => {
+        expect(formatBatterySettingsResponse(undefined)).toEqual({
+            enabled: true,
+            chargeUpperSocSunny: 40,
+            chargeUpperSocOvercast: 100,
+            usingDefaults: true
+        });
+    });
+
+    test('uses the saved override values when present', () => {
+        const item = { enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90 };
+        expect(formatBatterySettingsResponse(item)).toEqual({
+            enabled: false,
+            chargeUpperSocSunny: 25,
+            chargeUpperSocOvercast: 90,
+            usingDefaults: false
+        });
+    });
+});
+
+describe('DashboardApiFunction validateBatterySettings', () => {
+    test('accepts a valid payload', () => {
+        expect(validateBatterySettings({ enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 })).toBeNull();
+    });
+
+    test('rejects a non-boolean enabled field', () => {
+        expect(validateBatterySettings({ enabled: 'yes', chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 }))
+            .toMatch(/enabled/);
+    });
+
+    test.each([
+        [-1, 100], [101, 100], [40, -1], [40, 101], ['40', 100], [undefined, 100]
+    ])('rejects out-of-range or non-numeric percentages (%p, %p)', (sunny, overcast) => {
+        expect(validateBatterySettings({ enabled: true, chargeUpperSocSunny: sunny, chargeUpperSocOvercast: overcast }))
+            .toEqual(expect.any(String));
+    });
+
+    test('accepts boundary values 0 and 100', () => {
+        expect(validateBatterySettings({ enabled: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100 })).toBeNull();
     });
 });

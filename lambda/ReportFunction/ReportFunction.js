@@ -1,7 +1,7 @@
 'use strict';
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, QueryCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const {
@@ -22,6 +22,12 @@ const AI_HISTORY_LOOKBACK_DAYS = Number(process.env.AI_HISTORY_LOOKBACK_DAYS) ||
 const PEAK_WINDOW_LABEL = 'peak-evening';
 const LOW_SOC_THRESHOLD = 30;
 
+// Report records share the readings table (same partition/sort key schema)
+// under a sentinel DeviceSn that can't collide with a real inverter serial —
+// DashboardApiFunction's /insights route queries the same prefix to surface
+// the latest one on the dashboard.
+const REPORT_RECORD_PREFIX = 'REPORT#';
+
 const AI_SYSTEM_PROMPT = `You are an energy analyst for a home solar + battery system. You are given \
 today's usage assessment (import broken down by tariff window, PV yield, export, and battery charge/ \
 discharge/SOC if available) plus a day-by-day summary of the recent history for context. Respond with \
@@ -38,7 +44,14 @@ Do not restate ordinary day-to-day variation as an anomaly.`;
 // see PollerFunction.js). Without them, the recommendation falls back to
 // grid-pattern-only reasoning.
 
-exports.handler = async () => {
+// event.sendEmail — defaults true (bare EventBridge scheduled invocations, and
+// anything else with no payload, keep today's behavior). Explicitly false for
+// the 6x/day refresh schedule and the dashboard's manual "run assessment now"
+// trigger — both want a fresh assessment + stored record without also
+// sending another nightly-style email each time.
+exports.handler = async (event) => {
+    const sendEmail = event?.sendEmail !== false;
+
     try {
         const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
         const deviceSn = process.env.SOLAX_INVERTER_SN;
@@ -54,15 +67,30 @@ exports.handler = async () => {
 
         const assessment = assessUsage(readings, tariff);
         const aiInsights = await getAiInsights(assessment, tariff, deviceSn, endSeconds);
+        const recommendationText = recommendation(assessment, tariff);
         const report = formatReport(assessment, tariff, LOOKBACK_DAYS, aiInsights);
 
-        await snsClient.send(new PublishCommand({
-            TopicArn: process.env.REPORTS_TOPIC_ARN,
-            Subject: `PowerPlant nightly report — ${LOOKBACK_DAYS}-day summary`,
-            Message: report
-        }));
+        if (sendEmail) {
+            await snsClient.send(new PublishCommand({
+                TopicArn: process.env.REPORTS_TOPIC_ARN,
+                Subject: `PowerPlant nightly report — ${LOOKBACK_DAYS}-day summary`,
+                Message: report
+            }));
+        }
 
-        logInfo('Nightly report published', { deviceSn, readingCount: readings.length });
+        // Best-effort — the dashboard's "AI insights" section just falls back to
+        // its last successfully stored record if this write fails, so it never
+        // blocks a sent email (if any, above) on a DynamoDB hiccup.
+        try {
+            await docClient.send(new PutCommand({
+                TableName: process.env.ENERGY_READINGS_TABLE,
+                Item: buildReportRecord(deviceSn, endSeconds, LOOKBACK_DAYS, assessment, recommendationText, aiInsights)
+            }));
+        } catch (err) {
+            logError('Failed to store report record for the dashboard', { error: err.message });
+        }
+
+        logInfo(sendEmail ? 'Nightly report published' : 'Assessment refreshed (no email)', { deviceSn, readingCount: readings.length });
         return { statusCode: 200 };
     } catch (err) {
         logError('Nightly report failed', { error: err.message });
@@ -305,6 +333,17 @@ function recommendation(assessment, tariff) {
     );
 }
 
+function buildReportRecord(deviceSn, timestampSeconds, lookbackDays, assessment, recommendationText, aiInsights) {
+    return {
+        DeviceSn: `${REPORT_RECORD_PREFIX}${deviceSn}`,
+        Timestamp: timestampSeconds,
+        lookbackDays,
+        assessment,
+        recommendation: recommendationText,
+        aiInsights: aiInsights || null
+    };
+}
+
 function round2(n) {
     return Math.round(n * 100) / 100;
 }
@@ -314,3 +353,6 @@ module.exports.formatReport = formatReport;
 module.exports.dailySummaries = dailySummaries;
 module.exports.parseAiResponse = parseAiResponse;
 module.exports.getAiInsights = getAiInsights;
+module.exports.recommendation = recommendation;
+module.exports.buildReportRecord = buildReportRecord;
+module.exports.REPORT_RECORD_PREFIX = REPORT_RECORD_PREFIX;

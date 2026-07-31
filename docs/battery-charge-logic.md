@@ -55,7 +55,7 @@ ELSE:
     → overcast   (ambiguous / partly-cloudy — safe default)
 ```
 
-`sunny` → `chargeUpperSoc = 40`. `overcast` → `chargeUpperSoc = 100`.
+`sunny` → `chargeUpperSoc = chargeUpperSocSunny` (default 40). `overcast` → `chargeUpperSoc = chargeUpperSocOvercast` (default 100). Both percentages — and a nightly on/off switch — are editable from the dashboard; see "Dashboard-editable settings" below for how that overrides these defaults.
 
 **The asymmetry is deliberate.** "Sunny" requires *both* thresholds to clearly pass; anything ambiguous, or where the two signals disagree, falls to `overcast`. The cost of guessing "overcast" on an actually-sunny day is a slightly fuller battery than strictly necessary (mild inefficiency). The cost of guessing "sunny" on an actually-overcast day is potentially running the battery flat with no solar to refill it — a materially worse outcome. The thresholds are biased toward the cheaper mistake.
 
@@ -83,13 +83,35 @@ Example 4 is the one most worth double-checking against your own judgement — a
 - **`dryRun: false`**: does all of the above, then actually calls `setInverterSelfUseMode`, and emails an "applied" message instead.
 - Any failure (weather API error, SolaX auth error, control-call error) publishes a "FAILED" message to the *alerts* topic and lets the Lambda error (so the `BatteryControlFunctionErrorAlarm` CloudWatch alarm fires) — no partial/silent failures.
 
+## Dashboard-editable settings
+
+`chargeUpperSocSunny`/`chargeUpperSocOvercast` and a nightly on/off switch can be changed from the dashboard's "Battery Control Settings" panel — no redeploy needed. Saving writes one row to the same readings table, under a fixed sentinel key (`DeviceSn = BATTERY_CONTROL_SETTINGS#<inverterSn>`, `Timestamp = 0` — a single upserted settings row, not time-series). Each run, `BatteryControlFunction.loadSettingsOverride` reads that row and `resolveEffectiveSettings` merges it over `config.batteryControl`'s static defaults — an unset field in the saved override (or no saved override at all yet) falls back to the config value, so this is purely additive to the existing config-driven baseline, never required.
+
+**The on/off toggle is a real kill switch, not just another `dryRun`.** When `enabled: false`, the function skips the forecast/decision/apply logic entirely for that run — no weather call, no SolaX call — and just writes a status record noting automation is off, so the dashboard reflects it clearly. This is independent of `dryRun`: you can have automation enabled-but-dry-run (the safe validation state described above), or disabled outright regardless of `dryRun`.
+
+This was the app's first *write* path from the dashboard (`PUT /battery-settings`), which is exactly what the Cognito login exists to protect — a write action needs real authentication, not just the API key CloudFront injects. `GET /battery-settings` returns the currently-effective values (falling back to `config.batteryControl`'s `chargeUpperSocSunny`/`chargeUpperSocOvercast` — passed to `DashboardApiFunction` as `BATTERY_CONTROL_DEFAULT_SUNNY`/`_OVERCAST` env vars — when nothing's been saved yet) so the settings form always shows something sensible on first load.
+
+**Caveat worth knowing**: this baseline-override mechanism only ever touches `chargeUpperSocSunny`/`chargeUpperSocOvercast`/`enabled` — `minSoc`, `chargeFromGridEnable`, and the time windows are still config-only (see "Stale baseline" below); those aren't exposed on the dashboard.
+
+## Previous-decision accuracy assessment
+
+Each run, before deciding tonight's target, `BatteryControlFunction.assessPreviousDecision` looks back at the *last* stored decision (whatever `BatteryControlFunction` decided the previous time it ran with automation enabled) and the actual readings between then and now, and asks Bedrock to judge it in hindsight — same additive, never-fails-the-run pattern as `ReportFunction.getAiInsights`: no `config.bedrock.modelId` configured, a Bedrock error, an unparsable response, or simply not enough history yet (first-ever run, or the previous run was a disabled skip) all just mean this run's record has no `previousAssessment` field.
+
+The assessment answers two things, stored as `previousAssessment` on the *new* record (not a retroactive edit of the old one):
+
+1. **Was the % right, given what the weather actually did?** E.g. a 40% "sunny" call that then saw the battery run flat before solar caught up gets flagged `accurate: false`; a 100% "overcast" call on a day that turned out mild/sunny likewise, the other direction.
+2. **Does household usage load — not just weather — belong in the decision?** `usageShouldInfluence: true` plus a `usageNote` when the actual PV yield/import/export/battery-SOC-range summary (`summarizeUsage`) suggests something about that day's consumption (not just the forecast) should have factored in — e.g. unusually high overnight load. `classifyForecast` itself still only ever looks at weather; this is a separate hindsight signal surfaced to you, not fed back into tomorrow's decision automatically.
+
+Shown on the dashboard as a small "Last night's accuracy" widget alongside the weather/charge-decision ones.
+
 ## Known risks to weigh before enabling live control
 
-- **Stale baseline**: if you change `minSoc`, the time windows, or `chargeFromGridEnable` in the SolaX app directly after this goes live, this function will silently overwrite that change back to whatever's in `config.batteryControl` the next time it runs — because it always resends the full baseline. Any manual change to those settings needs a matching config update + redeploy, or it won't stick.
+- **Stale baseline**: if you change `minSoc`, the time windows, or `chargeFromGridEnable` in the SolaX app directly after this goes live, this function will silently overwrite that change back to whatever's in `config.batteryControl` the next time it runs — because it always resends the full baseline. Any manual change to those settings needs a matching config update + redeploy, or it won't stick. (This does *not* apply to `chargeUpperSocSunny`/`chargeUpperSocOvercast`/`enabled` — those are dashboard-editable, see above.)
 - **Endpoint choice unconfirmed**: this targets the plain Inverter endpoint (`batch_set_spontaneity_self_use`) based on your confirmation that there's no EMS1000/EMS1000 PRO device on this system. If that's ever wrong, this endpoint won't be the one actually controlling the inverter's behavior.
 - **Single forecast source, single point**: one lat/lon, one provider, no fallback — a forecast that's simply wrong for that day (weather forecasting is inherently imperfect) will drive a wrong decision with no cross-check.
 - **No verification the change "took"**: there's no read-back endpoint (see above), so a successful API response doesn't strictly prove the inverter's behavior actually changed — only that SolaX Cloud accepted the request.
+- **The dashboard on/off toggle is easy to forget about**: since it's a real kill switch independent of `dryRun`, turning it off from the dashboard (e.g. while travelling, or debugging something else) silently pauses automation indefinitely until someone turns it back on — there's no expiry or reminder.
 
 ## How to validate before flipping `dryRun: false`
 
-Leave `dryRun: true` running for at least a couple of weeks. Each morning, compare the emailed "DRY RUN" message (classification + reasoning + the `chargeUpperSoc` it would have set) against what the weather actually did that day. If the classification and reasoning consistently match your own judgement, it's reasonable to flip `dryRun` to `false` in your local config and redeploy. If example-4-style borderline days keep coming up wrong, tighten the `maxPop`/`avgClouds` thresholds in `classifyForecast` first.
+Leave `dryRun: true` running for at least a couple of weeks. Each morning, compare the emailed "DRY RUN" message (classification + reasoning + the `chargeUpperSoc` it would have set) against what the weather actually did that day — the dashboard's "Last night's accuracy" widget (see above) is doing a version of this same comparison automatically once a Bedrock model is configured, so it's worth cross-checking your own read against its `accurate` verdict too. If the classification and reasoning consistently match your own judgement, it's reasonable to flip `dryRun` to `false` in your local config and redeploy. If example-4-style borderline days keep coming up wrong, tighten the `maxPop`/`avgClouds` thresholds in `classifyForecast` first.

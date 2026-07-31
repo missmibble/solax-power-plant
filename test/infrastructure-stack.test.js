@@ -89,6 +89,15 @@ describe('InfrastructureStack', () => {
         Template.fromStack(stack).resourceCountIs('Custom::AWS', 3);
     });
 
+    // ─── Cognito ──────────────────────────────────────────────────────────────
+
+    test('creates a Cognito User Pool with self-signup disabled', () => {
+        template.hasResourceProperties('AWS::Cognito::UserPool', {
+            UserPoolName: config.cognito.userPoolName,
+            AdminCreateUserConfig: { AllowAdminCreateUserOnly: true }
+        });
+    });
+
     // ─── Outputs ───────────────────────────────────────────────────────────────
 
     test('exports EnergyReadingsTableName output', () => {

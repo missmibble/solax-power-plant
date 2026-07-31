@@ -29,13 +29,15 @@ describe('DashboardStack', () => {
             config,
             energyReadingsTable: infraStack.energyReadingsTable,
             alertsTopic: infraStack.alertsTopic,
-            reportsTopic: infraStack.reportsTopic
+            reportsTopic: infraStack.reportsTopic,
+            userPool: infraStack.userPool
         });
 
         const dashboardStack = new DashboardStack(app, 'TestDashboardStack', {
             env,
             config,
-            api: lambdaStack.api
+            api: lambdaStack.api,
+            userPoolClient: lambdaStack.userPoolClient
         });
         dashboardStack.addStackDependency(lambdaStack);
 
@@ -59,11 +61,13 @@ describe('DashboardStack', () => {
         });
     });
 
-    test('routes the "readings" path pattern to the API origin', () => {
+    test('routes the "readings", "insights", and "battery-status" path patterns to the API origin', () => {
         template.hasResourceProperties('AWS::CloudFront::Distribution', {
             DistributionConfig: Match.objectLike({
                 CacheBehaviors: Match.arrayWith([
-                    Match.objectLike({ PathPattern: 'readings' })
+                    Match.objectLike({ PathPattern: 'readings' }),
+                    Match.objectLike({ PathPattern: 'insights' }),
+                    Match.objectLike({ PathPattern: 'battery-status' })
                 ])
             })
         });

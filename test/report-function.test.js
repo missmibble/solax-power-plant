@@ -2,7 +2,15 @@
 
 const fs = require('fs');
 const path = require('path');
-const { assessUsage, formatReport, dailySummaries, parseAiResponse } = require('../lambda/ReportFunction/ReportFunction');
+const {
+    assessUsage,
+    formatReport,
+    dailySummaries,
+    parseAiResponse,
+    recommendation,
+    buildReportRecord,
+    REPORT_RECORD_PREFIX
+} = require('../lambda/ReportFunction/ReportFunction');
 
 const config = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'config', 'dev-powerplant.json'), 'utf8')
@@ -235,5 +243,43 @@ describe('ReportFunction parseAiResponse', () => {
 
     test('returns null when the text has no JSON object at all', () => {
         expect(parseAiResponse('not json')).toBeNull();
+    });
+});
+
+describe('ReportFunction buildReportRecord', () => {
+    test('prefixes DeviceSn with REPORT_RECORD_PREFIX so it cannot collide with a real device serial', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const record = buildReportRecord('H34ABCDEFG5001', 1785400000, 1, assessment, 'Recommendation: text.', null);
+
+        expect(record.DeviceSn).toBe(`${REPORT_RECORD_PREFIX}H34ABCDEFG5001`);
+        expect(record.Timestamp).toBe(1785400000);
+        expect(record.lookbackDays).toBe(1);
+        expect(record.assessment).toBe(assessment);
+        expect(record.recommendation).toBe('Recommendation: text.');
+    });
+
+    test('stores null (not undefined) for aiInsights when none was generated', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const record = buildReportRecord('H34ABCDEFG5001', 1785400000, 1, assessment, 'Recommendation: text.', null);
+
+        expect(record.aiInsights).toBeNull();
+    });
+
+    test('stores the AI insights object when present', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const aiInsights = { narrative: 'All normal.', anomalies: [] };
+        const record = buildReportRecord('H34ABCDEFG5001', 1785400000, 1, assessment, 'Recommendation: text.', aiInsights);
+
+        expect(record.aiInsights).toEqual(aiInsights);
+    });
+});
+
+describe('ReportFunction recommendation (exported directly)', () => {
+    test('is the same text formatReport embeds', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const text = recommendation(assessment, config.tariff);
+        const report = formatReport(assessment, config.tariff, 1);
+
+        expect(report).toContain(text);
     });
 });

@@ -1,11 +1,23 @@
 'use strict';
 
-// Talks to DashboardApiFunction's GET /readings?range=day|week via the same
-// CloudFront distribution this page is served from — the "readings" cache
-// behavior forwards to API Gateway with the API key injected as a static
-// origin header, so this file never needs to know the key.
+// Talks to DashboardApiFunction's GET /readings|/insights|/battery-status via
+// the same CloudFront distribution this page is served from. Two independent
+// layers protect those calls: CloudFront injects the API key as a static
+// origin header (this file never needs to know it), and API Gateway also
+// requires a valid Cognito ID token in the Authorization header — which is
+// what the login form below is for. config.json (deployed alongside this
+// file, not a secret — Cognito app clients have no client secret) supplies
+// the User Pool Client ID and region needed to talk to Cognito directly.
+
+const SESSION_TOKEN_KEY = 'powerplant.idToken';
+const SESSION_EXPIRES_KEY = 'powerplant.tokenExpiresAt';
 
 const els = {
+  loginSection: document.getElementById('loginSection'),
+  loginForm: document.getElementById('loginForm'),
+  loginError: document.getElementById('loginError'),
+  dashboardRoot: document.getElementById('dashboardRoot'),
+  logoutButton: document.getElementById('logoutButton'),
   status: document.getElementById('status'),
   cards: document.getElementById('cards'),
   chartWrap: document.getElementById('chartWrap'),
@@ -18,10 +30,151 @@ const els = {
   netCost: document.getElementById('netCost'),
   batteryCard: document.getElementById('batteryCard'),
   batterySOC: document.getElementById('batterySOC'),
-  batteryChargeDischarge: document.getElementById('batteryChargeDischarge')
+  batteryChargeDischarge: document.getElementById('batteryChargeDischarge'),
+  weatherWidget: document.getElementById('weatherWidget'),
+  weatherClassification: document.getElementById('weatherClassification'),
+  weatherReasoning: document.getElementById('weatherReasoning'),
+  batteryDecisionWidget: document.getElementById('batteryDecisionWidget'),
+  batteryChargeTarget: document.getElementById('batteryChargeTarget'),
+  batteryDecisionMeta: document.getElementById('batteryDecisionMeta'),
+  batteryStatusStatus: document.getElementById('batteryStatusStatus'),
+  insightsSection: document.getElementById('insightsSection'),
+  insightsStatus: document.getElementById('insightsStatus'),
+  insightsMeta: document.getElementById('insightsMeta'),
+  recommendationBox: document.getElementById('recommendationBox'),
+  aiNarrativeBox: document.getElementById('aiNarrativeBox'),
+  aiNarrativeText: document.getElementById('aiNarrativeText'),
+  anomaliesLabel: document.getElementById('anomaliesLabel'),
+  aiAnomaliesList: document.getElementById('aiAnomaliesList'),
+  previousAssessmentWidget: document.getElementById('previousAssessmentWidget'),
+  previousAssessmentAccurate: document.getElementById('previousAssessmentAccurate'),
+  previousAssessmentText: document.getElementById('previousAssessmentText'),
+  batterySettingsForm: document.getElementById('batterySettingsForm'),
+  batteryControlEnabled: document.getElementById('batteryControlEnabled'),
+  chargeUpperSocSunny: document.getElementById('chargeUpperSocSunny'),
+  chargeUpperSocOvercast: document.getElementById('chargeUpperSocOvercast'),
+  batterySettingsStatus: document.getElementById('batterySettingsStatus'),
+  runAssessmentButton: document.getElementById('runAssessmentButton'),
+  triggerStatus: document.getElementById('triggerStatus')
 };
 
 let chart;
+let authClientConfig; // { userPoolClientId, region } — loaded from config.json
+
+// ─── Auth ──────────────────────────────────────────────────────────────────
+
+function getStoredToken() {
+  const token = sessionStorage.getItem(SESSION_TOKEN_KEY);
+  const expiresAt = Number(sessionStorage.getItem(SESSION_EXPIRES_KEY));
+  if (!token || !expiresAt || Date.now() >= expiresAt) return null;
+  return token;
+}
+
+function storeToken(idToken, expiresInSeconds) {
+  sessionStorage.setItem(SESSION_TOKEN_KEY, idToken);
+  sessionStorage.setItem(SESSION_EXPIRES_KEY, String(Date.now() + expiresInSeconds * 1000));
+}
+
+function clearToken() {
+  sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  sessionStorage.removeItem(SESSION_EXPIRES_KEY);
+}
+
+// No SDK, no refresh-token flow — a plain call to Cognito's public JSON API.
+// USER_PASSWORD_AUTH must be enabled on the app client (it is, see
+// lib/lambda-functions-stack.js) and the user's password must already be
+// permanent (admin-set-user-password --permanent at setup time — see
+// README), since this doesn't handle the NEW_PASSWORD_REQUIRED challenge.
+async function signIn(username, password) {
+  const res = await fetch(`https://cognito-idp.${authClientConfig.region}.amazonaws.com/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-amz-json-1.1',
+      'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth'
+    },
+    body: JSON.stringify({
+      AuthFlow: 'USER_PASSWORD_AUTH',
+      ClientId: authClientConfig.userPoolClientId,
+      AuthParameters: { USERNAME: username, PASSWORD: password }
+    })
+  });
+
+  const payload = await res.json();
+
+  if (!res.ok) {
+    throw new Error(payload.message || payload.__type || `Sign-in failed (${res.status})`);
+  }
+
+  if (!payload.AuthenticationResult) {
+    throw new Error(
+      payload.ChallengeName
+        ? `Account needs a one-time setup step (${payload.ChallengeName}) — see README.`
+        : 'Sign-in did not return a token.'
+    );
+  }
+
+  storeToken(payload.AuthenticationResult.IdToken, payload.AuthenticationResult.ExpiresIn);
+}
+
+// Attaches the Cognito ID token to every dashboard API call. On a 401/403
+// (expired/invalid token), drops back to the login form rather than showing
+// a raw error — this app doesn't refresh tokens, so re-entering credentials
+// is the expected path once the (1 hour) token expires.
+async function authorizedFetch(path, options = {}) {
+  const token = getStoredToken();
+  const headers = { ...options.headers, ...(token ? { Authorization: token } : {}) };
+  const res = await fetch(path, { ...options, headers });
+
+  if (res.status === 401 || res.status === 403) {
+    clearToken();
+    showLogin('Your session expired — please sign in again.');
+    throw new Error('Session expired');
+  }
+
+  return res;
+}
+
+function showLogin(message) {
+  els.dashboardRoot.hidden = true;
+  els.loginSection.hidden = false;
+  if (message) {
+    els.loginError.textContent = message;
+    els.loginError.hidden = false;
+  }
+}
+
+function showDashboard() {
+  els.loginSection.hidden = true;
+  els.dashboardRoot.hidden = false;
+  loadReadings('day');
+  loadInsights();
+  loadBatteryStatus();
+  loadBatterySettings();
+}
+
+els.loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  els.loginError.hidden = true;
+
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+
+  try {
+    await signIn(username, password);
+    els.loginForm.reset();
+    showDashboard();
+  } catch (err) {
+    els.loginError.textContent = err.message;
+    els.loginError.hidden = false;
+  }
+});
+
+els.logoutButton.addEventListener('click', () => {
+  clearToken();
+  showLogin();
+});
+
+// ─── Readings ──────────────────────────────────────────────────────────────
 
 document.querySelectorAll('.range-button').forEach(button => {
   button.addEventListener('click', () => {
@@ -42,7 +195,7 @@ async function loadReadings(range) {
   els.chartWrap.hidden = true;
 
   try {
-    const res = await fetch(`readings?range=${encodeURIComponent(range)}`);
+    const res = await authorizedFetch(`readings?range=${encodeURIComponent(range)}`);
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
 
     const data = await res.json();
@@ -114,8 +267,200 @@ function renderChart(data) {
   });
 }
 
+// ─── Insights (nightly recommendation + AI narrative) ──────────────────────
+
+function setInsightsStatus(message) {
+  els.insightsStatus.textContent = message;
+  els.insightsStatus.hidden = !message;
+}
+
+async function loadInsights() {
+  els.insightsSection.hidden = true;
+
+  try {
+    const res = await authorizedFetch('insights');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+
+    if (!data.available) {
+      setInsightsStatus('No nightly report yet — check back after tonight’s run.');
+      return;
+    }
+
+    renderInsights(data);
+    setInsightsStatus('');
+  } catch (err) {
+    setInsightsStatus(`Couldn't load insights: ${err.message}`);
+  }
+}
+
+function renderInsights(data) {
+  els.insightsMeta.textContent =
+    `From the ${data.lookbackDays}-day report generated ${formatTime(data.generatedAt)}`;
+  els.recommendationBox.textContent = data.recommendation;
+
+  if (data.aiInsights) {
+    els.aiNarrativeText.textContent = data.aiInsights.narrative;
+
+    const anomalies = data.aiInsights.anomalies || [];
+    els.anomaliesLabel.textContent = anomalies.length ? 'Anomalies flagged:' : 'No anomalies flagged.';
+    els.aiAnomaliesList.innerHTML = '';
+    for (const anomaly of anomalies) {
+      const li = document.createElement('li');
+      li.textContent = anomaly;
+      els.aiAnomaliesList.appendChild(li);
+    }
+
+    els.aiNarrativeBox.hidden = false;
+  } else {
+    els.aiNarrativeBox.hidden = true;
+  }
+
+  els.insightsSection.hidden = false;
+}
+
+// ─── Weather + battery charge decision ──────────────────────────────────────
+
+async function loadBatteryStatus() {
+  els.weatherWidget.hidden = true;
+  els.batteryDecisionWidget.hidden = true;
+  els.previousAssessmentWidget.hidden = true;
+
+  try {
+    const res = await authorizedFetch('battery-status');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+
+    if (!data.available) {
+      setBatteryStatusMessage('No battery control decision yet.');
+      return;
+    }
+
+    renderBatteryStatus(data);
+    setBatteryStatusMessage('');
+  } catch (err) {
+    setBatteryStatusMessage(`Couldn't load battery status: ${err.message}`);
+  }
+}
+
+function setBatteryStatusMessage(message) {
+  els.batteryStatusStatus.textContent = message;
+  els.batteryStatusStatus.hidden = !message;
+}
+
+function renderBatteryStatus(data) {
+  if (!data.enabled) {
+    els.weatherClassification.textContent = '—';
+    els.weatherReasoning.textContent = 'Nightly charge control is currently turned off.';
+    els.weatherWidget.hidden = false;
+
+    els.batteryChargeTarget.textContent = 'Disabled';
+    els.batteryDecisionMeta.textContent = `As of ${formatTime(data.decidedAt)}`;
+    els.batteryDecisionWidget.hidden = false;
+  } else {
+    els.weatherClassification.textContent =
+      data.classification === 'sunny' ? '☀️ Sunny' : '☁️ Overcast/uncertain';
+    els.weatherReasoning.textContent = data.reasoning;
+    els.weatherWidget.hidden = false;
+
+    els.batteryChargeTarget.textContent = `${data.chargeUpperSoc}% charge target`;
+    els.batteryDecisionMeta.textContent = data.dryRun
+      ? `Dry run — decided ${formatTime(data.decidedAt)}, not applied`
+      : `Applied ${formatTime(data.decidedAt)}`;
+    els.batteryDecisionWidget.hidden = false;
+  }
+
+  if (data.previousAssessment) {
+    els.previousAssessmentAccurate.textContent = data.previousAssessment.accurate ? '✓ On target' : '✗ Off target';
+    els.previousAssessmentText.textContent = data.previousAssessment.usageShouldInfluence
+      ? `${data.previousAssessment.assessment} ${data.previousAssessment.usageNote}`
+      : data.previousAssessment.assessment;
+    els.previousAssessmentWidget.hidden = false;
+  }
+}
+
+// ─── Battery control settings (edit charge % + on/off toggle) ──────────────
+
+async function loadBatterySettings() {
+  try {
+    const res = await authorizedFetch('battery-settings');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    els.batteryControlEnabled.checked = data.enabled;
+    els.chargeUpperSocSunny.value = data.chargeUpperSocSunny;
+    els.chargeUpperSocOvercast.value = data.chargeUpperSocOvercast;
+    setBatterySettingsStatus('');
+  } catch (err) {
+    setBatterySettingsStatus(`Couldn't load settings: ${err.message}`);
+  }
+}
+
+function setBatterySettingsStatus(message) {
+  els.batterySettingsStatus.textContent = message;
+  els.batterySettingsStatus.hidden = !message;
+}
+
+els.batterySettingsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setBatterySettingsStatus('Saving…');
+
+  try {
+    const res = await authorizedFetch('battery-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: els.batteryControlEnabled.checked,
+        chargeUpperSocSunny: Number(els.chargeUpperSocSunny.value),
+        chargeUpperSocOvercast: Number(els.chargeUpperSocOvercast.value)
+      })
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Request failed: ${res.status}`);
+    }
+
+    setBatterySettingsStatus('Saved — takes effect on the next nightly run.');
+  } catch (err) {
+    setBatterySettingsStatus(`Couldn't save settings: ${err.message}`);
+  }
+});
+
+// ─── Manual assessment trigger ──────────────────────────────────────────────
+
+els.runAssessmentButton.addEventListener('click', async () => {
+  els.triggerStatus.hidden = false;
+  els.triggerStatus.textContent = 'Starting assessment…';
+
+  try {
+    const res = await authorizedFetch('insights', { method: 'POST' });
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    els.triggerStatus.textContent = data.message || 'Assessment started — check back shortly.';
+  } catch (err) {
+    els.triggerStatus.textContent = `Couldn't trigger assessment: ${err.message}`;
+  }
+});
+
+// ─── Init ────────────────────────────────────────────────────────────────
+
 function formatTime(epochSeconds) {
   return new Date(epochSeconds * 1000).toLocaleString();
 }
 
-loadReadings('day');
+async function init() {
+  const res = await fetch('config.json');
+  authClientConfig = await res.json();
+
+  if (getStoredToken()) {
+    showDashboard();
+  } else {
+    showLogin();
+  }
+}
+
+init();

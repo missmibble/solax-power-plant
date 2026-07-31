@@ -7,12 +7,28 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
+<section id="loginSection" class="login-section">
+  <form id="loginForm" class="login-form">
+    <h1>PowerPlant</h1>
+    <p class="login-sub">Sign in to view the dashboard</p>
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+    <p id="loginError" class="login-error" hidden></p>
+  </form>
+</section>
+
+<div id="dashboardRoot" hidden>
 <header>
   <h1>PowerPlant</h1>
   <div class="range-toggle" role="group" aria-label="Date range">
     <button type="button" class="range-button" data-range="day" aria-pressed="true">Today</button>
     <button type="button" class="range-button" data-range="week" aria-pressed="false">This week</button>
   </div>
+  <button type="button" id="logoutButton" class="logout-button">Sign out</button>
 </header>
 
 <main>
@@ -49,7 +65,83 @@
   </section>
 
   <p id="meta" class="meta"></p>
+
+  <section class="widgets" id="widgetsSection">
+    <div class="widget" id="weatherWidget" hidden>
+      <span class="widget-label">Tomorrow's forecast</span>
+      <span class="widget-value" id="weatherClassification">–</span>
+      <span class="widget-sub" id="weatherReasoning">–</span>
+    </div>
+    <div class="widget" id="batteryDecisionWidget" hidden>
+      <span class="widget-label">Charge decision</span>
+      <span class="widget-value" id="batteryChargeTarget">–</span>
+      <span class="widget-sub" id="batteryDecisionMeta">–</span>
+    </div>
+    <div class="widget" id="previousAssessmentWidget" hidden>
+      <span class="widget-label">Last night's accuracy</span>
+      <span class="widget-value" id="previousAssessmentAccurate">–</span>
+      <span class="widget-sub" id="previousAssessmentText">–</span>
+    </div>
+  </section>
+  <p id="batteryStatusStatus" class="status" hidden></p>
+
+  <section class="settings" id="batterySettingsSection">
+    <h2>Battery Control Settings</h2>
+    <form id="batterySettingsForm" class="settings-form">
+      <div class="field">
+        <label class="toggle-row">
+          <input type="checkbox" id="batteryControlEnabled">
+          Nightly charge control enabled
+        </label>
+        <p class="field-description">
+          When off, the nightly automation is skipped entirely — no forecast check, no change sent to the
+          inverter. A real on/off switch, independent of dry-run mode.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="chargeUpperSocSunny">Sunny forecast charge target (%)</label>
+        <input type="number" id="chargeUpperSocSunny" min="0" max="100" required>
+        <p class="field-description">
+          How full to charge the battery overnight when tomorrow is forecast sunny. Usually lower — just
+          enough to cover the morning before solar production ramps up and takes over.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="chargeUpperSocOvercast">Overcast/rainy forecast charge target (%)</label>
+        <input type="number" id="chargeUpperSocOvercast" min="0" max="100" required>
+        <p class="field-description">
+          How full to charge the battery overnight when tomorrow is forecast overcast, rainy, or uncertain.
+          Usually kept high, since there's little solar to top it back up during the day.
+        </p>
+      </div>
+
+      <button type="submit">Save settings</button>
+      <p id="batterySettingsStatus" class="status" hidden></p>
+    </form>
+  </section>
+
+  <section class="insights" id="insightsSection" hidden>
+    <div class="insights-header">
+      <h2>Insights &amp; Recommendation</h2>
+      <button type="button" id="runAssessmentButton">Run assessment now</button>
+    </div>
+    <p class="insights-meta" id="insightsMeta"></p>
+    <p id="triggerStatus" class="status" hidden></p>
+
+    <div class="recommendation" id="recommendationBox"></div>
+
+    <div class="ai-narrative" id="aiNarrativeBox" hidden>
+      <h3>AI insights</h3>
+      <p id="aiNarrativeText"></p>
+      <p class="anomalies-label" id="anomaliesLabel"></p>
+      <ul id="aiAnomaliesList"></ul>
+    </div>
+  </section>
+  <p id="insightsStatus" class="status" hidden></p>
 </main>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="app.js"></script>

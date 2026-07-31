@@ -96,6 +96,7 @@ const lambdaStack = new LambdaFunctionsStack(app, 'PowerPlantLambdaFunctionsStac
     energyReadingsTable: infraStack.energyReadingsTable,
     alertsTopic: infraStack.alertsTopic,
     reportsTopic: infraStack.reportsTopic,
+    userPool: infraStack.userPool,
     description: 'powerplant: Poller, Dashboard API, Alert, and Report Lambdas + EventBridge + API Gateway'
 });
 
@@ -115,6 +116,7 @@ if (config.api.apiKeyValue && !config.api.apiKeyValue.startsWith('TODO_')) {
         env,
         config,
         api: lambdaStack.api,
+        userPoolClient: lambdaStack.userPoolClient,
         description: 'powerplant: S3 + CloudFront dashboard in front of the DashboardApiFunction'
     });
 

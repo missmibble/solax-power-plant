@@ -33,6 +33,10 @@
       "description": "Static assets for the web dashboard (S3 + CloudFront is a later build phase)"
     }
   },
+  "cognito": {
+    "userPoolName": "powerplant-dashboard-users",
+    "cfResource": "PowerPlantUserPool"
+  },
   "sns": {
     "alertsTopic": {
       "topicName": "powerplant-alerts",
@@ -137,7 +141,8 @@
       "description": "Nightly assessment of stored usage data; recommends battery configuration optimizations and publishes a report",
       "assetPath": "lambda/ReportFunction",
       "timer": 60,
-      "schedule": "cron(0 16 * * ? *)"
+      "schedule": "cron(0 16 * * ? *)",
+      "refreshSchedule": "cron(0 0,4,8,12,16,20 * * ? *)"
     },
     "batteryControlFunction": {
       "functionName": "BatteryControlFunction",
