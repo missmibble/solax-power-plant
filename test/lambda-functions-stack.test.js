@@ -227,6 +227,58 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
+    describe('with a cross-region inference profile modelId', () => {
+        // Cross-region profile IDs (e.g. "au.anthropic.claude-haiku-4-5-20251001-v1:0")
+        // aren't invoked in this stack's own region for the underlying model call —
+        // Bedrock routes within the profile's geography — so the IAM grant needs a
+        // region-wildcarded foundation-model ARN (built from the ID with its geo
+        // prefix stripped) alongside the profile ARN itself in this region. See
+        // LambdaFunctionsStack.bedrockInvokeResources.
+        let profileTemplate;
+        const profileModelId = 'au.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+        beforeAll(() => {
+            const profileConfig = { ...config, bedrock: { ...config.bedrock, modelId: profileModelId } };
+            const app = new cdk.App();
+            const env = { account: '123456789012', region: 'ap-southeast-2' };
+
+            const infraStack = new InfrastructureStack(app, 'TestProfileInfrastructureStack', { env, config: profileConfig });
+            const lambdaStack = new LambdaFunctionsStack(app, 'TestProfileLambdaFunctionsStack', {
+                env,
+                config: profileConfig,
+                energyReadingsTable: infraStack.energyReadingsTable,
+                alertsTopic: infraStack.alertsTopic,
+                reportsTopic: infraStack.reportsTopic,
+                userPool: infraStack.userPool
+            });
+
+            profileTemplate = Template.fromStack(lambdaStack);
+        });
+
+        test.each([
+            ['BatteryControlFunction'],
+            ['ReportFunction']
+        ])('%s is granted both the wildcard-region foundation-model ARN and the same-region inference-profile ARN', (functionName) => {
+            const policies = profileTemplate.findResources('AWS::IAM::Policy', {
+                Properties: { PolicyName: Match.stringLikeRegexp(functionName) }
+            });
+            const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
+            const bedrockStatement = statements.find(s => s.Action === 'bedrock:InvokeModel');
+
+            expect(bedrockStatement).toBeDefined();
+            expect(bedrockStatement.Resource).toHaveLength(2);
+            // Resource entries are Fn::Join intrinsics (this.partition is a CDK
+            // token, not a literal), so assert on the literal ARN suffix each
+            // one joins in rather than a fully-resolved string.
+            expect(JSON.stringify(bedrockStatement.Resource[0])).toContain(
+                ':bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0'
+            );
+            expect(JSON.stringify(bedrockStatement.Resource[1])).toContain(
+                `:bedrock:ap-southeast-2:123456789012:inference-profile/${profileModelId}`
+            );
+        });
+    });
+
     test('DashboardApiFunction role can write to the energy readings table (for settings saves)', () => {
         template.hasResourceProperties('AWS::IAM::Policy', {
             PolicyName: Match.stringLikeRegexp('DashboardApiFunction'),
