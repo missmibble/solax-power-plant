@@ -310,34 +310,76 @@ main {
   margin: 0 0 0.75rem;
 }
 
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: 320px;
+/* Full-width table: one row per setting (label | description | value), rather
+   than a narrow stacked column — makes room for the description to sit next
+   to its setting instead of wrapping underneath it. */
+.settings-table-wrap {
+  overflow-x: auto;
 }
 
-.settings-form label {
-  font-size: 0.8rem;
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.settings-table th,
+.settings-table td {
+  text-align: left;
+  padding: 0.75rem 1rem 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.settings-table thead th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: #888;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
 }
 
-.toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.settings-table tbody th {
   font-size: 0.9rem;
+  font-weight: 600;
   color: var(--fg);
+  white-space: nowrap;
 }
 
-.settings-form input[type="number"] {
+.settings-table tbody td {
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.4;
+}
+
+.settings-table label {
+  cursor: pointer;
+}
+
+.value-cell {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.settings-table input[type="number"] {
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
   font-size: 1rem;
-  margin-bottom: 0.5rem;
+  width: 90px;
+}
+
+.settings-table input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.value-cell .unit {
+  margin-left: 0.35rem;
+  color: #888;
+  font-size: 0.9rem;
 }
 
 .settings-form button {

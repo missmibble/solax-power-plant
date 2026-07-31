@@ -174,7 +174,12 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
     const originalEnv = process.env;
 
     beforeEach(() => {
-        process.env = { ...originalEnv, BATTERY_CONTROL_DEFAULT_SUNNY: '40', BATTERY_CONTROL_DEFAULT_OVERCAST: '100' };
+        process.env = {
+            ...originalEnv,
+            BATTERY_CONTROL_DEFAULT_SUNNY: '40',
+            BATTERY_CONTROL_DEFAULT_OVERCAST: '100',
+            BATTERY_CONTROL_DEFAULT_DISABLED: '100'
+        };
     });
 
     afterEach(() => {
@@ -186,16 +191,18 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
             enabled: true,
             chargeUpperSocSunny: 40,
             chargeUpperSocOvercast: 100,
+            disabledChargeUpperSoc: 100,
             usingDefaults: true
         });
     });
 
     test('uses the saved override values when present', () => {
-        const item = { enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90 };
+        const item = { enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80 };
         expect(formatBatterySettingsResponse(item)).toEqual({
             enabled: false,
             chargeUpperSocSunny: 25,
             chargeUpperSocOvercast: 90,
+            disabledChargeUpperSoc: 80,
             usingDefaults: false
         });
     });
@@ -203,22 +210,29 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
 
 describe('DashboardApiFunction validateBatterySettings', () => {
     test('accepts a valid payload', () => {
-        expect(validateBatterySettings({ enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 })).toBeNull();
+        expect(validateBatterySettings({
+            enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+        })).toBeNull();
     });
 
     test('rejects a non-boolean enabled field', () => {
-        expect(validateBatterySettings({ enabled: 'yes', chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 }))
-            .toMatch(/enabled/);
+        expect(validateBatterySettings({
+            enabled: 'yes', chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+        })).toMatch(/enabled/);
     });
 
     test.each([
-        [-1, 100], [101, 100], [40, -1], [40, 101], ['40', 100], [undefined, 100]
-    ])('rejects out-of-range or non-numeric percentages (%p, %p)', (sunny, overcast) => {
-        expect(validateBatterySettings({ enabled: true, chargeUpperSocSunny: sunny, chargeUpperSocOvercast: overcast }))
-            .toEqual(expect.any(String));
+        [-1, 100, 100], [101, 100, 100], [40, -1, 100], [40, 101, 100], ['40', 100, 100],
+        [undefined, 100, 100], [40, 100, -1], [40, 100, 101], [40, 100, undefined]
+    ])('rejects out-of-range or non-numeric percentages (%p, %p, %p)', (sunny, overcast, disabled) => {
+        expect(validateBatterySettings({
+            enabled: true, chargeUpperSocSunny: sunny, chargeUpperSocOvercast: overcast, disabledChargeUpperSoc: disabled
+        })).toEqual(expect.any(String));
     });
 
     test('accepts boundary values 0 and 100', () => {
-        expect(validateBatterySettings({ enabled: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100 })).toBeNull();
+        expect(validateBatterySettings({
+            enabled: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 0
+        })).toBeNull();
     });
 });

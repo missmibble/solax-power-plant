@@ -61,13 +61,29 @@ describe('DashboardStack', () => {
         });
     });
 
-    test('routes the "readings", "insights", and "battery-status" path patterns to the API origin', () => {
+    test('routes the "readings", "insights", "battery-status", and "battery-settings" path patterns to the API origin', () => {
         template.hasResourceProperties('AWS::CloudFront::Distribution', {
             DistributionConfig: Match.objectLike({
                 CacheBehaviors: Match.arrayWith([
                     Match.objectLike({ PathPattern: 'readings' }),
                     Match.objectLike({ PathPattern: 'insights' }),
-                    Match.objectLike({ PathPattern: 'battery-status' })
+                    Match.objectLike({ PathPattern: 'battery-status' }),
+                    Match.objectLike({ PathPattern: 'battery-settings' })
+                ])
+            })
+        });
+    });
+
+    test.each([
+        ['readings', Match.exact(['GET', 'HEAD'])],
+        ['battery-status', Match.exact(['GET', 'HEAD'])],
+        ['insights', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])],
+        ['battery-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])]
+    ])('CloudFront behavior for "%s" allows the expected methods', (pathPattern, allowedMethodsMatcher) => {
+        template.hasResourceProperties('AWS::CloudFront::Distribution', {
+            DistributionConfig: Match.objectLike({
+                CacheBehaviors: Match.arrayWith([
+                    Match.objectLike({ PathPattern: pathPattern, AllowedMethods: allowedMethodsMatcher })
                 ])
             })
         });
@@ -75,5 +91,59 @@ describe('DashboardStack', () => {
 
     test('exports a DashboardUrl output', () => {
         template.hasOutput('DashboardUrl', { Export: { Name: 'PowerPlantDashboardUrl' } });
+    });
+
+    test('does not attach an alternate domain when config.dashboard is left at its TODO_ placeholders', () => {
+        template.hasResourceProperties('AWS::CloudFront::Distribution', {
+            DistributionConfig: Match.objectLike({ Aliases: Match.absent() })
+        });
+    });
+});
+
+describe('DashboardStack with a custom domain configured', () => {
+    let template;
+
+    beforeAll(() => {
+        const customDomainConfig = {
+            ...config,
+            dashboard: {
+                domainName: 'power.stillbroken.tech',
+                certificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/test-cert-id'
+            }
+        };
+
+        const app = new cdk.App();
+        const env = { account: '123456789012', region: 'ap-southeast-2' };
+
+        const infraStack = new InfrastructureStack(app, 'TestCustomDomainInfrastructureStack', { env, config: customDomainConfig });
+        const lambdaStack = new LambdaFunctionsStack(app, 'TestCustomDomainLambdaFunctionsStack', {
+            env,
+            config: customDomainConfig,
+            energyReadingsTable: infraStack.energyReadingsTable,
+            alertsTopic: infraStack.alertsTopic,
+            reportsTopic: infraStack.reportsTopic,
+            userPool: infraStack.userPool
+        });
+
+        const dashboardStack = new DashboardStack(app, 'TestCustomDomainDashboardStack', {
+            env,
+            config: customDomainConfig,
+            api: lambdaStack.api,
+            userPoolClient: lambdaStack.userPoolClient
+        });
+        dashboardStack.addStackDependency(lambdaStack);
+
+        template = Template.fromStack(dashboardStack);
+    });
+
+    test('retains the alternate domain and its ACM certificate on the CloudFront distribution', () => {
+        template.hasResourceProperties('AWS::CloudFront::Distribution', {
+            DistributionConfig: Match.objectLike({
+                Aliases: ['power.stillbroken.tech'],
+                ViewerCertificate: Match.objectLike({
+                    AcmCertificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/test-cert-id'
+                })
+            })
+        });
     });
 });

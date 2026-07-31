@@ -221,7 +221,8 @@ function resolveEffectiveSettings(batteryControlConfig, override) {
     return {
         enabled: override?.enabled ?? true,
         chargeUpperSocSunny: override?.chargeUpperSocSunny ?? batteryControlConfig.chargeUpperSocSunny,
-        chargeUpperSocOvercast: override?.chargeUpperSocOvercast ?? batteryControlConfig.chargeUpperSocOvercast
+        chargeUpperSocOvercast: override?.chargeUpperSocOvercast ?? batteryControlConfig.chargeUpperSocOvercast,
+        disabledChargeUpperSoc: override?.disabledChargeUpperSoc ?? batteryControlConfig.disabledChargeUpperSoc
     };
 }
 
@@ -238,7 +239,7 @@ async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
 
     try {
         const previous = await queryPreviousStatusRecord(deviceSn, beforeTimestamp);
-        if (!previous || !previous.classification) return null; // nothing to assess yet, or last run was a disabled skip
+        if (!previous || !previous.classification) return null; // nothing to assess yet
 
         const readings = await queryReadingsSince(deviceSn, previous.Timestamp, beforeTimestamp);
         if (readings.length < 2) return null;
@@ -352,47 +353,44 @@ exports.handler = async () => {
         const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
         const deviceSn = process.env.SOLAX_INVERTER_SN;
         const nowSeconds = Math.floor(Date.now() / 1000);
+        const dryRun = batteryControlConfig.dryRun !== false;
 
         const settingsOverride = await loadSettingsOverride(deviceSn);
         const effective = resolveEffectiveSettings(batteryControlConfig, settingsOverride);
         const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds);
 
+        let classification;
+        let reasoning;
+        let chargeUpperSoc;
+
         if (!effective.enabled) {
-            logInfo('Battery control disabled via dashboard settings — skipping this run');
-            await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
-                classification: null,
-                reasoning: 'Automation disabled via dashboard settings.',
-                chargeUpperSoc: null,
-                dryRun: null,
-                applied: false,
-                enabled: false,
-                previousAssessment
-            }));
-            return { statusCode: 200 };
+            // The toggle turns off nightly *forecasting*, not the battery itself —
+            // it still holds chargeUpperSoc at a known-safe default (100% unless
+            // overridden) rather than leaving whatever the last automated run
+            // happened to decide. No weather call either way.
+            classification = 'disabled';
+            reasoning = `Automation disabled via dashboard settings — holding chargeUpperSoc at the configured default (${effective.disabledChargeUpperSoc}%) instead of leaving the last automated decision in place.`;
+            chargeUpperSoc = effective.disabledChargeUpperSoc;
+        } else {
+            const weatherApiKey = await loadWeatherApiKey();
+            const slots = await fetchTomorrowForecastSlots(
+                process.env.WEATHER_LAT, process.env.WEATHER_LON, weatherApiKey, tariff.timezone
+            );
+            ({ classification, reasoning } = classifyForecast(slots));
+            chargeUpperSoc = classification === 'sunny' ? effective.chargeUpperSocSunny : effective.chargeUpperSocOvercast;
         }
-
-        const dryRun = batteryControlConfig.dryRun !== false;
-
-        const weatherApiKey = await loadWeatherApiKey();
-        const slots = await fetchTomorrowForecastSlots(
-            process.env.WEATHER_LAT, process.env.WEATHER_LON, weatherApiKey, tariff.timezone
-        );
-        const { classification, reasoning } = classifyForecast(slots);
-        const chargeUpperSoc = classification === 'sunny'
-            ? effective.chargeUpperSocSunny
-            : effective.chargeUpperSocOvercast;
 
         const requestBody = buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc);
 
         if (dryRun) {
-            logInfo('Battery control dry run', { classification, reasoning, requestBody });
+            logInfo('Battery control dry run', { classification, reasoning, requestBody, enabled: effective.enabled });
             await publish(
                 process.env.REPORTS_TOPIC_ARN,
                 'PowerPlant battery control — DRY RUN (no change applied)',
                 formatMessage(classification, reasoning, requestBody, true)
             );
             await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
-                classification, reasoning, chargeUpperSoc, dryRun: true, applied: false, enabled: true, previousAssessment
+                classification, reasoning, chargeUpperSoc, dryRun: true, applied: false, enabled: effective.enabled, previousAssessment
             }));
             return { statusCode: 200 };
         }
@@ -408,14 +406,14 @@ exports.handler = async () => {
             ...requestBody
         });
 
-        logInfo('Battery control applied', { classification, reasoning, requestBody });
+        logInfo('Battery control applied', { classification, reasoning, requestBody, enabled: effective.enabled });
         await publish(
             process.env.REPORTS_TOPIC_ARN,
             'PowerPlant battery control — applied',
             formatMessage(classification, reasoning, requestBody, false)
         );
         await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
-            classification, reasoning, chargeUpperSoc, dryRun: false, applied: true, enabled: true, previousAssessment
+            classification, reasoning, chargeUpperSoc, dryRun: false, applied: true, enabled: effective.enabled, previousAssessment
         }));
         return { statusCode: 200 };
     } catch (err) {

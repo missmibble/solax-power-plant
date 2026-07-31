@@ -55,6 +55,7 @@ const BASELINE_CONFIG = {
     chargeFromGridEnable: 1,
     chargeUpperSocSunny: 40,
     chargeUpperSocOvercast: 100,
+    disabledChargeUpperSoc: 100,
     chargeStartTimePeriod1: '00:00',
     chargeEndTimePeriod1: '06:00',
     chargeStartTimePeriod2: '00:00',
@@ -203,19 +204,25 @@ describe('BatteryControlFunction', () => {
     describe('resolveEffectiveSettings', () => {
         test('falls back to config defaults when there is no saved override', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
-            expect(effective).toEqual({ enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 });
+            expect(effective).toEqual({
+                enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            });
         });
 
         test('uses the override values when present', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, {
-                enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90
+                enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
             });
-            expect(effective).toEqual({ enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90 });
+            expect(effective).toEqual({
+                enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+            });
         });
 
         test('merges a partial override with config defaults for the untouched fields', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, { enabled: false });
-            expect(effective).toEqual({ enabled: false, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 });
+            expect(effective).toEqual({
+                enabled: false, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            });
         });
     });
 
@@ -358,7 +365,7 @@ describe('BatteryControlFunction', () => {
             expect(putCall.input.Item.chargeUpperSoc).toBe(25); // overridden sunny target, not the config's 40
         });
 
-        test('skips the whole run and stores a disabled record when the dashboard toggle is off', async () => {
+        test('skips the weather/forecast lookup but still dry-run-decides the disabled default when the dashboard toggle is off', async () => {
             mockDynamoSend.mockImplementation(command => {
                 if (command.__type === 'Get') return Promise.resolve({ Item: { enabled: false } });
                 if (command.__type === 'Query') return Promise.resolve({ Items: [] });
@@ -369,14 +376,47 @@ describe('BatteryControlFunction', () => {
             const result = await handler();
 
             expect(result.statusCode).toBe(200);
-            expect(global.fetch).not.toHaveBeenCalled();
-            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
-            expect(mockSnsSend).not.toHaveBeenCalled();
+            expect(global.fetch).not.toHaveBeenCalled(); // no forecast call needed when disabled
+            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled(); // dryRun: true by default
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Subject).toContain('DRY RUN');
 
             const putCall = findPutCall();
             expect(putCall.input.Item.enabled).toBe(false);
-            expect(putCall.input.Item.classification).toBeNull();
+            expect(putCall.input.Item.classification).toBe('disabled');
+            expect(putCall.input.Item.chargeUpperSoc).toBe(100); // BASELINE_CONFIG.disabledChargeUpperSoc
+            expect(putCall.input.Item.dryRun).toBe(true);
             expect(putCall.input.Item.applied).toBe(false);
+        });
+
+        test('applies the disabled default chargeUpperSoc to the inverter when disabled and not a dry run', async () => {
+            process.env.BATTERY_CONTROL_CONFIG = JSON.stringify({ ...BASELINE_CONFIG, dryRun: false });
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({ Item: { enabled: false } });
+                if (command.__type === 'Query') return Promise.resolve({ Items: [] });
+                return Promise.resolve({});
+            });
+            ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
+
+            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
+            mockGetAccessToken.mockResolvedValue('access-token');
+            mockSetInverterSelfUseMode.mockResolvedValue({ [process.env.SOLAX_INVERTER_SN]: { status: 0 } });
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            expect(global.fetch).not.toHaveBeenCalled();
+            expect(mockSetInverterSelfUseMode).toHaveBeenCalledTimes(1);
+            const [, , request] = mockSetInverterSelfUseMode.mock.calls[0];
+            expect(request.chargeUpperSoc).toBe(100);
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.enabled).toBe(false);
+            expect(putCall.input.Item.classification).toBe('disabled');
+            expect(putCall.input.Item.chargeUpperSoc).toBe(100);
+            expect(putCall.input.Item.dryRun).toBe(false);
+            expect(putCall.input.Item.applied).toBe(true);
         });
     });
 

@@ -53,6 +53,7 @@ const els = {
   batteryControlEnabled: document.getElementById('batteryControlEnabled'),
   chargeUpperSocSunny: document.getElementById('chargeUpperSocSunny'),
   chargeUpperSocOvercast: document.getElementById('chargeUpperSocOvercast'),
+  disabledChargeUpperSoc: document.getElementById('disabledChargeUpperSoc'),
   batterySettingsStatus: document.getElementById('batterySettingsStatus'),
   runAssessmentButton: document.getElementById('runAssessmentButton'),
   triggerStatus: document.getElementById('triggerStatus')
@@ -392,6 +393,7 @@ async function loadBatterySettings() {
     els.batteryControlEnabled.checked = data.enabled;
     els.chargeUpperSocSunny.value = data.chargeUpperSocSunny;
     els.chargeUpperSocOvercast.value = data.chargeUpperSocOvercast;
+    els.disabledChargeUpperSoc.value = data.disabledChargeUpperSoc;
     setBatterySettingsStatus('');
   } catch (err) {
     setBatterySettingsStatus(`Couldn't load settings: ${err.message}`);
@@ -414,7 +416,8 @@ els.batterySettingsForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         enabled: els.batteryControlEnabled.checked,
         chargeUpperSocSunny: Number(els.chargeUpperSocSunny.value),
-        chargeUpperSocOvercast: Number(els.chargeUpperSocOvercast.value)
+        chargeUpperSocOvercast: Number(els.chargeUpperSocOvercast.value),
+        disabledChargeUpperSoc: Number(els.disabledChargeUpperSoc.value)
       })
     });
 

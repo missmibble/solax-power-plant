@@ -184,7 +184,8 @@ async function handlePutBatterySettings(event) {
             Timestamp: SETTINGS_TIMESTAMP,
             enabled: body.enabled,
             chargeUpperSocSunny: body.chargeUpperSocSunny,
-            chargeUpperSocOvercast: body.chargeUpperSocOvercast
+            chargeUpperSocOvercast: body.chargeUpperSocOvercast,
+            disabledChargeUpperSoc: body.disabledChargeUpperSoc
         };
 
         await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
@@ -200,6 +201,7 @@ function validateBatterySettings(body) {
     if (typeof body.enabled !== 'boolean') return 'enabled must be a boolean';
     if (!isValidPercent(body.chargeUpperSocSunny)) return 'chargeUpperSocSunny must be a number between 0 and 100';
     if (!isValidPercent(body.chargeUpperSocOvercast)) return 'chargeUpperSocOvercast must be a number between 0 and 100';
+    if (!isValidPercent(body.disabledChargeUpperSoc)) return 'disabledChargeUpperSoc must be a number between 0 and 100';
     return null;
 }
 
@@ -212,6 +214,7 @@ function formatBatterySettingsResponse(item) {
         enabled: item?.enabled ?? true,
         chargeUpperSocSunny: item?.chargeUpperSocSunny ?? Number(process.env.BATTERY_CONTROL_DEFAULT_SUNNY),
         chargeUpperSocOvercast: item?.chargeUpperSocOvercast ?? Number(process.env.BATTERY_CONTROL_DEFAULT_OVERCAST),
+        disabledChargeUpperSoc: item?.disabledChargeUpperSoc ?? Number(process.env.BATTERY_CONTROL_DEFAULT_DISABLED),
         usingDefaults: !item
     };
 }
