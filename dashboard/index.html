@@ -111,6 +111,25 @@
   </section>
   <p id="batteryStatusStatus" class="status" hidden></p>
 
+  <section class="insights" id="insightsSection" hidden>
+    <div class="insights-header">
+      <h2>Insights &amp; Recommendation</h2>
+      <button type="button" id="runAssessmentButton">Run assessment now</button>
+    </div>
+    <p class="insights-meta" id="insightsMeta"></p>
+    <p id="triggerStatus" class="status" hidden></p>
+
+    <div class="recommendation" id="recommendationBox"></div>
+
+    <div class="ai-narrative" id="aiNarrativeBox" hidden>
+      <h3>AI insights</h3>
+      <p id="aiNarrativeText"></p>
+      <p class="anomalies-label" id="anomaliesLabel"></p>
+      <ul id="aiAnomaliesList"></ul>
+    </div>
+  </section>
+  <p id="insightsStatus" class="status" hidden></p>
+
   <section class="settings" id="batterySettingsSection">
     <h2>Battery Control Settings</h2>
     <form id="batterySettingsForm">
@@ -173,25 +192,6 @@
       <p id="batterySettingsStatus" class="status" hidden></p>
     </form>
   </section>
-
-  <section class="insights" id="insightsSection" hidden>
-    <div class="insights-header">
-      <h2>Insights &amp; Recommendation</h2>
-      <button type="button" id="runAssessmentButton">Run assessment now</button>
-    </div>
-    <p class="insights-meta" id="insightsMeta"></p>
-    <p id="triggerStatus" class="status" hidden></p>
-
-    <div class="recommendation" id="recommendationBox"></div>
-
-    <div class="ai-narrative" id="aiNarrativeBox" hidden>
-      <h3>AI insights</h3>
-      <p id="aiNarrativeText"></p>
-      <p class="anomalies-label" id="anomaliesLabel"></p>
-      <ul id="aiAnomaliesList"></ul>
-    </div>
-  </section>
-  <p id="insightsStatus" class="status" hidden></p>
 </main>
 </div>
 

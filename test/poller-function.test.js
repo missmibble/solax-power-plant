@@ -2,13 +2,16 @@
 
 const mockGetDeviceInfo = jest.fn();
 const mockGetDeviceRealtimeData = jest.fn();
+const mockGetAccessToken = jest.fn();
+const mockSsmSend = jest.fn();
+const mockDynamoSend = jest.fn();
 
 // These only live in lambda/PollerFunction/node_modules (per-function deps),
 // not the root node_modules test/ resolves from — virtual: true skips module
 // resolution instead of erroring.
 jest.mock('@aws-sdk/client-ssm', () => ({
-    SSMClient: jest.fn().mockImplementation(() => ({ send: jest.fn() })),
-    GetParameterCommand: jest.fn()
+    SSMClient: jest.fn().mockImplementation(() => ({ send: (...args) => mockSsmSend(...args) })),
+    GetParameterCommand: jest.fn().mockImplementation(input => ({ input }))
 }), { virtual: true });
 
 jest.mock('@aws-sdk/client-dynamodb', () => ({
@@ -16,8 +19,8 @@ jest.mock('@aws-sdk/client-dynamodb', () => ({
 }), { virtual: true });
 
 jest.mock('@aws-sdk/lib-dynamodb', () => ({
-    DynamoDBDocumentClient: { from: jest.fn().mockImplementation(() => ({ send: jest.fn() })) },
-    PutCommand: jest.fn()
+    DynamoDBDocumentClient: { from: jest.fn().mockImplementation(() => ({ send: (...args) => mockDynamoSend(...args) })) },
+    PutCommand: jest.fn().mockImplementation(input => ({ input }))
 }), { virtual: true });
 
 jest.mock('powerplant-shared', () => ({
@@ -25,7 +28,7 @@ jest.mock('powerplant-shared', () => ({
     logError: jest.fn(),
     BUSINESS_TYPE: { RESIDENTIAL: 1 },
     DEVICE_TYPE: { INVERTER: 1, BATTERY: 2 },
-    getAccessToken: jest.fn(),
+    getAccessToken: (...args) => mockGetAccessToken(...args),
     getDeviceInfo: (...args) => mockGetDeviceInfo(...args),
     getDeviceRealtimeData: (...args) => mockGetDeviceRealtimeData(...args)
 }), { virtual: true });
@@ -125,5 +128,66 @@ describe('PollerFunction battery discovery', () => {
             expect(reading).toBeNull();
             expect(mockGetDeviceRealtimeData).not.toHaveBeenCalled();
         });
+    });
+});
+
+describe('PollerFunction handler', () => {
+    let handler;
+
+    beforeEach(() => {
+        jest.resetModules();
+        mockGetDeviceInfo.mockReset();
+        mockGetDeviceRealtimeData.mockReset();
+        mockGetAccessToken.mockReset().mockResolvedValue('access-token');
+        mockSsmSend.mockReset().mockResolvedValue({ Parameter: { Value: 'secret-value' } });
+        mockDynamoSend.mockReset().mockResolvedValue({});
+
+        process.env.SOLAX_CLIENT_ID_PARAM = '/powerplant/solax/client-id';
+        process.env.SOLAX_CLIENT_SECRET_PARAM = '/powerplant/solax/client-secret';
+        process.env.SOLAX_BASE_URL = 'https://openapi-eu.solaxcloud.com';
+        process.env.SOLAX_BUSINESS_TYPE = '1';
+        process.env.SOLAX_INVERTER_SN = 'H34ABCDEFG5001';
+        process.env.SOLAX_BATTERY_SN = 'REDACTED-BATTERY-SN';
+        process.env.SOLAX_DEVICE_TYPE = '1';
+        process.env.ENERGY_READINGS_TABLE = 'POWERPLANT-ENERGY-READINGS';
+
+        ({ handler } = require('../lambda/PollerFunction/PollerFunction'));
+    });
+
+    function findPutCall() {
+        return mockDynamoSend.mock.calls[0][0];
+    }
+
+    // Regression test for a real bug: docs/solax-apis.md previously (incorrectly)
+    // documented this SolaX field as misspelled "totalDevicCharge" (missing "e"),
+    // and PollerFunction's mapping matched that documented typo — but the live
+    // API actually returns the correctly-spelled "totalDeviceCharge", so the old
+    // mapping read a key that never existed and totalDeviceCharge was silently
+    // undefined on every stored reading. That, in turn, meant the dashboard's
+    // battery panels never had the data they needed. Verified against a live
+    // SolaX API call before fixing.
+    test('maps the battery reading\'s totalDeviceCharge field by its real (correctly-spelled) name', async () => {
+        mockGetDeviceRealtimeData.mockImplementation((baseUrl, token, params) => {
+            if (params.deviceType === 1) {
+                return Promise.resolve([{
+                    deviceSn: 'H34ABCDEFG5001', dataTime: '2026-07-31T04:45:00.000+00:00',
+                    deviceStatus: 102, dailyYield: 22.7, totalYield: 444.9, dailyACOutput: 22.2,
+                    totalACOutput: 520.6, gridPower: 0, todayImportEnergy: 28.8, totalImportEnergy: 403.94,
+                    todayExportEnergy: 0.1, totalExportEnergy: 80.7, totalActivePower: null
+                }]);
+            }
+            return Promise.resolve([{
+                deviceSn: 'REDACTED-BATTERY-SN', deviceStatus: 1, batterySOC: 98, batterySOH: null,
+                chargeDischargePower: -352, batteryCycleTimes: 13, batteryRemainings: 18.0,
+                totalDeviceCharge: 246.2, totalDeviceDischarge: 222.2
+            }]);
+        });
+
+        const result = await handler();
+
+        expect(result.statusCode).toBe(200);
+        const putCall = findPutCall();
+        expect(putCall.input.Item.totalDeviceCharge).toBe(246.2);
+        expect(putCall.input.Item.totalDeviceDischarge).toBe(222.2);
     });
 });

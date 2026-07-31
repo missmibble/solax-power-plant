@@ -357,28 +357,43 @@ function aggregateReadings(readings, tariff) {
 // last is the most recent reading in the queried range, which always ends at
 // "now" regardless of whether range=day or range=week — so the instantaneous
 // fields below (SOC, power, health, cycles, remaining capacity) are always the
-// true latest poll, not something that changes with the day/week toggle.
+// true latest poll, not something that changes with the day/week toggle. They
+// only need `last` to have battery data at all — batteryChargeKwh/
+// batteryDischargeKwh are the only fields that genuinely need both `first` and
+// `last` (they're deltas across the range), so a `first` reading that predates
+// battery polling (or predates some other gap) shouldn't block everything else
+// from showing.
 function batterySummary(first, last) {
-    if (typeof first.totalDeviceCharge !== 'number' || typeof last.totalDeviceCharge !== 'number') {
+    if (typeof last.batterySOC !== 'number') {
         return {};
     }
 
-    return {
-        batteryChargeKwh: round2(last.totalDeviceCharge - first.totalDeviceCharge),
-        batteryDischargeKwh: round2(last.totalDeviceDischarge - first.totalDeviceDischarge),
+    const summary = {
         currentBatterySOC: last.batterySOC,
-        currentBatteryStatus: classifyBatteryStatus(last.chargeDischargePower),
+        currentBatteryStatus: classifyBatteryStatus(last.batteryDeviceStatus, last.chargeDischargePower),
         currentBatteryPowerW: typeof last.chargeDischargePower === 'number' ? last.chargeDischargePower : null,
         batterySOH: typeof last.batterySOH === 'number' ? last.batterySOH : null,
         batteryCycleTimes: typeof last.batteryCycleTimes === 'number' ? last.batteryCycleTimes : null,
         batteryRemainingsKwh: typeof last.batteryRemainings === 'number' ? last.batteryRemainings : null
     };
+
+    if (typeof first.totalDeviceCharge === 'number' && typeof last.totalDeviceCharge === 'number') {
+        summary.batteryChargeKwh = round2(last.totalDeviceCharge - first.totalDeviceCharge);
+        summary.batteryDischargeKwh = round2(last.totalDeviceDischarge - first.totalDeviceDischarge);
+    }
+
+    return summary;
 }
 
-// chargeDischargePower is +charge/-discharge in watts (docs/solax-apis.md
-// Appendix — Battery fields) — the sign alone tells us charging vs
-// discharging, no need for the coarser deviceStatus (Idle/Work) enum.
-function classifyBatteryStatus(chargeDischargePower) {
+// deviceStatus is the battery's own state machine (docs/solax-apis.md Appendix
+// 6 — residential batteries only ever report 0=Idle/1=Work); chargeDischargePower
+// is +charge/-discharge in watts (§4.4 Battery fields). deviceStatus=0 is
+// authoritative for "idle" — trusting the power sign alone would misreport as
+// charging/discharging on sensor noise (a reading of a few watts) while the
+// device itself is genuinely idle. deviceStatus=1 ("Work") doesn't distinguish
+// charging from discharging by itself, so the power sign still decides which.
+function classifyBatteryStatus(deviceStatus, chargeDischargePower) {
+    if (deviceStatus === 0) return 'idle';
     if (typeof chargeDischargePower !== 'number' || chargeDischargePower === 0) return 'idle';
     return chargeDischargePower > 0 ? 'charging' : 'discharging';
 }

@@ -98,6 +98,34 @@ describe('DashboardApiFunction aggregateReadings', () => {
         expect(rollup.currentBatterySOC).toBe(30);
     });
 
+    test('shows current SOC/status/health even when the oldest reading in range predates totalDeviceCharge data', () => {
+        // e.g. the range's `first` reading is from before PollerFunction started
+        // recording totalDeviceCharge (a real historical gap this app hit — see
+        // PollerFunction.js), or from before a battery was ever configured. Only
+        // batteryChargeKwh/batteryDischargeKwh genuinely need both first and last;
+        // everything else describes the latest reading alone and shouldn't be
+        // blocked by a gap earlier in the range.
+        const readingsWithPartialBattery = [
+            readings[0], // no battery fields at all — predates battery data
+            { ...readings[1], batterySOC: 55 },
+            {
+                ...readings[2], batterySOC: 30, batteryDeviceStatus: 1, chargeDischargePower: 250,
+                batterySOH: 97, batteryCycleTimes: 12, batteryRemainings: 8.2
+            }
+        ];
+
+        const rollup = aggregateReadings(readingsWithPartialBattery, config.tariff);
+
+        expect(rollup.currentBatterySOC).toBe(30);
+        expect(rollup.currentBatteryStatus).toBe('charging');
+        expect(rollup.currentBatteryPowerW).toBe(250);
+        expect(rollup.batterySOH).toBe(97);
+        expect(rollup.batteryCycleTimes).toBe(12);
+        expect(rollup.batteryRemainingsKwh).toBe(8.2);
+        expect(rollup.batteryChargeKwh).toBeUndefined();
+        expect(rollup.batteryDischargeKwh).toBeUndefined();
+    });
+
     test.each([
         [500, 'charging'],
         [-800, 'discharging'],
@@ -113,6 +141,20 @@ describe('DashboardApiFunction aggregateReadings', () => {
         const rollup = aggregateReadings(readingsWithBattery, config.tariff);
         expect(rollup.currentBatteryStatus).toBe(expectedStatus);
         expect(rollup.currentBatteryPowerW).toBe(typeof power === 'number' ? power : null);
+    });
+
+    test('trusts batteryDeviceStatus=0 (Idle) over a non-zero chargeDischargePower reading (sensor noise)', () => {
+        const readingsWithBattery = [
+            { ...readings[0], totalDeviceCharge: 20, totalDeviceDischarge: 15, batterySOC: 40 },
+            { ...readings[1], totalDeviceCharge: 21, totalDeviceDischarge: 15, batterySOC: 55 },
+            {
+                ...readings[2], totalDeviceCharge: 21, totalDeviceDischarge: 17.5, batterySOC: 30,
+                batteryDeviceStatus: 0, chargeDischargePower: 3 // a few watts of noise while genuinely idle
+            }
+        ];
+
+        const rollup = aggregateReadings(readingsWithBattery, config.tariff);
+        expect(rollup.currentBatteryStatus).toBe('idle');
     });
 
     test('includes battery health, cycle count, and remaining capacity from the latest reading', () => {

@@ -133,8 +133,12 @@ exports.handler = async () => {
                     batteryRemainings: batteryReading.batteryRemainings,
                     chargeDischargePower: batteryReading.chargeDischargePower,
                     batteryCycleTimes: batteryReading.batteryCycleTimes,
-                    // docs/solax-apis.md documents the source field as "totalDevicCharge" (sic)
-                    totalDeviceCharge: batteryReading.totalDevicCharge,
+                    // docs/solax-apis.md previously documented this source field as
+                    // "totalDevicCharge" (missing "e") — verified against a live API
+                    // call that the real field is correctly spelled "totalDeviceCharge";
+                    // the old mapping read a key that never existed, so this field was
+                    // silently undefined on every stored reading since the app went live.
+                    totalDeviceCharge: batteryReading.totalDeviceCharge,
                     totalDeviceDischarge: batteryReading.totalDeviceDischarge
                 })
             }

@@ -237,7 +237,9 @@ function render(data) {
     els.batteryCard.hidden = false;
     els.batterySOC.textContent = `${data.currentBatterySOC}% SOC`;
     els.batteryChargeDischarge.textContent =
-      `charged ${data.batteryChargeKwh} kWh / discharged ${data.batteryDischargeKwh} kWh`;
+      typeof data.batteryChargeKwh === 'number' && typeof data.batteryDischargeKwh === 'number'
+        ? `charged ${data.batteryChargeKwh} kWh / discharged ${data.batteryDischargeKwh} kWh`
+        : 'charge/discharge history not available for this range yet';
   } else {
     els.batteryCard.hidden = true;
   }
