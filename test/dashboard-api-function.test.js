@@ -133,7 +133,12 @@ describe('DashboardApiFunction formatInsightsResponse', () => {
 
 describe('DashboardApiFunction formatBatteryStatusResponse', () => {
     test('reports unavailable when no battery status record exists yet', () => {
-        expect(formatBatteryStatusResponse(null)).toEqual({ available: false });
+        expect(formatBatteryStatusResponse(null)).toEqual({ available: false, currentWeather: null });
+    });
+
+    test('includes live current weather even when no battery status record exists yet', () => {
+        const currentWeather = { tempC: 22, description: 'clear sky' };
+        expect(formatBatteryStatusResponse(null, currentWeather)).toEqual({ available: false, currentWeather });
     });
 
     test('shapes a stored battery status record into the API response', () => {
@@ -148,9 +153,11 @@ describe('DashboardApiFunction formatBatteryStatusResponse', () => {
             enabled: true,
             previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
         };
+        const currentWeather = { tempC: 18, description: 'few clouds' };
 
-        expect(formatBatteryStatusResponse(item)).toEqual({
+        expect(formatBatteryStatusResponse(item, currentWeather)).toEqual({
             available: true,
+            currentWeather,
             decidedAt: 1785400000,
             classification: 'sunny',
             reasoning: 'maxPop=0.05, avgClouds=10%',
@@ -160,6 +167,12 @@ describe('DashboardApiFunction formatBatteryStatusResponse', () => {
             enabled: true,
             previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
         });
+    });
+
+    test('defaults currentWeather to null when the current-weather lookup failed or is unconfigured', () => {
+        const item = { Timestamp: 1785400000, classification: 'sunny', chargeUpperSoc: 40, dryRun: true, applied: false };
+        expect(formatBatteryStatusResponse(item, null).currentWeather).toBeNull();
+        expect(formatBatteryStatusResponse(item).currentWeather).toBeNull();
     });
 
     test('defaults enabled to true and previousAssessment to null when the record predates those fields', () => {

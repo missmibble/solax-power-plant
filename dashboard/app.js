@@ -32,6 +32,7 @@ const els = {
   batterySOC: document.getElementById('batterySOC'),
   batteryChargeDischarge: document.getElementById('batteryChargeDischarge'),
   weatherWidget: document.getElementById('weatherWidget'),
+  weatherCurrent: document.getElementById('weatherCurrent'),
   weatherClassification: document.getElementById('weatherClassification'),
   weatherReasoning: document.getElementById('weatherReasoning'),
   batteryDecisionWidget: document.getElementById('batteryDecisionWidget'),
@@ -324,7 +325,12 @@ function renderInsights(data) {
 // ─── Weather + battery charge decision ──────────────────────────────────────
 
 async function loadBatteryStatus() {
-  els.weatherWidget.hidden = true;
+  // The weather widget always stays on the page — it just shows a pending/
+  // unavailable state until there's data to report, rather than popping in
+  // and out. The other two widgets have nothing meaningful to show until a
+  // decision exists, so they stay hidden until then.
+  setCurrentWeather(null, 'Loading current weather…');
+  setForecastDecision('—', 'Loading tomorrow’s forecast…');
   els.batteryDecisionWidget.hidden = true;
   els.previousAssessmentWidget.hidden = true;
 
@@ -333,8 +339,10 @@ async function loadBatteryStatus() {
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
 
     const data = await res.json();
+    setCurrentWeather(data.currentWeather);
 
     if (!data.available) {
+      setForecastDecision('—', 'No forecast decision yet — check back after tonight’s automated run.');
       setBatteryStatusMessage('No battery control decision yet.');
       return;
     }
@@ -342,6 +350,8 @@ async function loadBatteryStatus() {
     renderBatteryStatus(data);
     setBatteryStatusMessage('');
   } catch (err) {
+    setCurrentWeather(null, 'Couldn’t load current weather.');
+    setForecastDecision('—', 'Couldn’t load the forecast.');
     setBatteryStatusMessage(`Couldn't load battery status: ${err.message}`);
   }
 }
@@ -351,20 +361,39 @@ function setBatteryStatusMessage(message) {
   els.batteryStatusStatus.hidden = !message;
 }
 
+// currentWeather is a live OpenWeatherMap lookup (DashboardApiFunction.fetchCurrentWeather),
+// independent of whether BatteryControlFunction has ever run — falls back to
+// a plain unavailable message (or the loadingMessage while a request is in
+// flight) rather than hiding the widget, same "always present" reasoning as
+// loadBatteryStatus above.
+function setCurrentWeather(currentWeather, loadingMessage) {
+  if (loadingMessage) {
+    els.weatherCurrent.textContent = loadingMessage;
+    return;
+  }
+
+  els.weatherCurrent.textContent = currentWeather && typeof currentWeather.tempC === 'number'
+    ? currentWeather.description ? `${currentWeather.tempC}°C, ${currentWeather.description}` : `${currentWeather.tempC}°C`
+    : 'Current weather unavailable';
+}
+
+function setForecastDecision(classification, reasoning) {
+  els.weatherClassification.textContent = classification;
+  els.weatherReasoning.textContent = reasoning;
+}
+
 function renderBatteryStatus(data) {
   if (!data.enabled) {
-    els.weatherClassification.textContent = '—';
-    els.weatherReasoning.textContent = 'Nightly charge control is currently turned off.';
-    els.weatherWidget.hidden = false;
+    setForecastDecision('—', 'Nightly charge control is currently turned off.');
 
     els.batteryChargeTarget.textContent = 'Disabled';
     els.batteryDecisionMeta.textContent = `As of ${formatTime(data.decidedAt)}`;
     els.batteryDecisionWidget.hidden = false;
   } else {
-    els.weatherClassification.textContent =
-      data.classification === 'sunny' ? '☀️ Sunny' : '☁️ Overcast/uncertain';
-    els.weatherReasoning.textContent = data.reasoning;
-    els.weatherWidget.hidden = false;
+    setForecastDecision(
+      data.classification === 'sunny' ? '☀️ Sunny' : '☁️ Overcast/uncertain',
+      data.reasoning
+    );
 
     els.batteryChargeTarget.textContent = `${data.chargeUpperSoc}% charge target`;
     els.batteryDecisionMeta.textContent = data.dryRun
