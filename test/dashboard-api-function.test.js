@@ -77,6 +77,11 @@ describe('DashboardApiFunction aggregateReadings', () => {
         expect(rollup.batteryChargeKwh).toBeUndefined();
         expect(rollup.batteryDischargeKwh).toBeUndefined();
         expect(rollup.currentBatterySOC).toBeUndefined();
+        expect(rollup.currentBatteryStatus).toBeUndefined();
+        expect(rollup.currentBatteryPowerW).toBeUndefined();
+        expect(rollup.batterySOH).toBeUndefined();
+        expect(rollup.batteryCycleTimes).toBeUndefined();
+        expect(rollup.batteryRemainingsKwh).toBeUndefined();
     });
 
     test('includes battery charge/discharge deltas and current SOC when battery data is present', () => {
@@ -91,6 +96,39 @@ describe('DashboardApiFunction aggregateReadings', () => {
         expect(rollup.batteryChargeKwh).toBeCloseTo(1, 5);
         expect(rollup.batteryDischargeKwh).toBeCloseTo(2.5, 5);
         expect(rollup.currentBatterySOC).toBe(30);
+    });
+
+    test.each([
+        [500, 'charging'],
+        [-800, 'discharging'],
+        [0, 'idle'],
+        [undefined, 'idle']
+    ])('classifies chargeDischargePower=%p as currentBatteryStatus=%p', (power, expectedStatus) => {
+        const readingsWithBattery = [
+            { ...readings[0], totalDeviceCharge: 20, totalDeviceDischarge: 15, batterySOC: 40 },
+            { ...readings[1], totalDeviceCharge: 21, totalDeviceDischarge: 15, batterySOC: 55 },
+            { ...readings[2], totalDeviceCharge: 21, totalDeviceDischarge: 17.5, batterySOC: 30, chargeDischargePower: power }
+        ];
+
+        const rollup = aggregateReadings(readingsWithBattery, config.tariff);
+        expect(rollup.currentBatteryStatus).toBe(expectedStatus);
+        expect(rollup.currentBatteryPowerW).toBe(typeof power === 'number' ? power : null);
+    });
+
+    test('includes battery health, cycle count, and remaining capacity from the latest reading', () => {
+        const readingsWithBattery = [
+            { ...readings[0], totalDeviceCharge: 20, totalDeviceDischarge: 15, batterySOC: 40 },
+            { ...readings[1], totalDeviceCharge: 21, totalDeviceDischarge: 15, batterySOC: 55 },
+            {
+                ...readings[2], totalDeviceCharge: 21, totalDeviceDischarge: 17.5, batterySOC: 30,
+                batterySOH: 98, batteryCycleTimes: 42, batteryRemainings: 6.4
+            }
+        ];
+
+        const rollup = aggregateReadings(readingsWithBattery, config.tariff);
+        expect(rollup.batterySOH).toBe(98);
+        expect(rollup.batteryCycleTimes).toBe(42);
+        expect(rollup.batteryRemainingsKwh).toBe(6.4);
     });
 });
 

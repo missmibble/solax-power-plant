@@ -31,6 +31,13 @@ const els = {
   batteryCard: document.getElementById('batteryCard'),
   batterySOC: document.getElementById('batterySOC'),
   batteryChargeDischarge: document.getElementById('batteryChargeDischarge'),
+  batteryStatusPanelSection: document.getElementById('batteryStatusPanelSection'),
+  liveBatterySOC: document.getElementById('liveBatterySOC'),
+  liveBatteryStatus: document.getElementById('liveBatteryStatus'),
+  liveBatteryPower: document.getElementById('liveBatteryPower'),
+  liveBatterySOH: document.getElementById('liveBatterySOH'),
+  liveBatteryRemaining: document.getElementById('liveBatteryRemaining'),
+  liveBatteryCycles: document.getElementById('liveBatteryCycles'),
   weatherWidget: document.getElementById('weatherWidget'),
   weatherCurrent: document.getElementById('weatherCurrent'),
   weatherClassification: document.getElementById('weatherClassification'),
@@ -195,6 +202,7 @@ async function loadReadings(range) {
   setStatus('Loading…');
   els.cards.hidden = true;
   els.chartWrap.hidden = true;
+  els.batteryStatusPanelSection.hidden = true;
 
   try {
     const res = await authorizedFetch(`readings?range=${encodeURIComponent(range)}`);
@@ -233,11 +241,46 @@ function render(data) {
     els.batteryCard.hidden = true;
   }
 
+  renderLiveBatteryStatus(data);
+
   els.cards.hidden = false;
   els.meta.textContent = `${data.readingCount} readings, ${formatTime(data.from)} – ${formatTime(data.to)}`;
 
   renderChart(data);
   els.chartWrap.hidden = false;
+}
+
+// The instantaneous fields (SOC/status/power/health/cycles/remaining) on the
+// /readings response always reflect the latest poll regardless of the day/week
+// range toggle — see DashboardApiFunction.batterySummary — so this panel never
+// changes when switching ranges, unlike the accumulated kWh cards above it.
+function renderLiveBatteryStatus(data) {
+  if (typeof data.currentBatterySOC !== 'number') {
+    els.batteryStatusPanelSection.hidden = true;
+    return;
+  }
+
+  els.liveBatterySOC.textContent = `${data.currentBatterySOC}%`;
+  els.liveBatteryStatus.textContent = formatBatteryStatusLabel(data.currentBatteryStatus);
+  els.liveBatteryPower.textContent = formatBatteryPower(data.currentBatteryStatus, data.currentBatteryPowerW);
+  els.liveBatterySOH.textContent = typeof data.batterySOH === 'number' ? `${data.batterySOH}%` : '–';
+  els.liveBatteryRemaining.textContent =
+    typeof data.batteryRemainingsKwh === 'number' ? `${data.batteryRemainingsKwh} kWh` : '–';
+  els.liveBatteryCycles.textContent =
+    typeof data.batteryCycleTimes === 'number' ? `${data.batteryCycleTimes} cycles` : '–';
+
+  els.batteryStatusPanelSection.hidden = false;
+}
+
+function formatBatteryStatusLabel(status) {
+  if (status === 'charging') return '⬆️ Charging';
+  if (status === 'discharging') return '⬇️ Discharging';
+  return '⏸️ Idle';
+}
+
+function formatBatteryPower(status, watts) {
+  if (typeof watts !== 'number' || status === 'idle') return '';
+  return `${(Math.abs(watts) / 1000).toFixed(2)} kW`;
 }
 
 function renderChart(data) {
@@ -263,6 +306,7 @@ function renderChart(data) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false, // .chart-wrap sets an explicit height (see styles.css) so the chart fills it predictably at any viewport width, rather than being squeezed/stretched by a fixed aspect ratio
       plugins: { legend: { display: false } },
       scales: { y: { beginAtZero: true, title: { display: true, text: 'kWh' } } }
     }

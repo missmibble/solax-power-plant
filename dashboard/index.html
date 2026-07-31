@@ -61,10 +61,34 @@
   </section>
 
   <section class="chart-wrap" hidden id="chartWrap">
-    <canvas id="energyChart" height="120"></canvas>
+    <canvas id="energyChart"></canvas>
   </section>
 
   <p id="meta" class="meta"></p>
+
+  <section class="battery-status-panel" id="batteryStatusPanelSection" hidden>
+    <h2>Current Battery Status</h2>
+    <div class="cards">
+      <div class="card">
+        <span class="card-label">State of Charge</span>
+        <span class="card-value" id="liveBatterySOC">–</span>
+      </div>
+      <div class="card">
+        <span class="card-label">Status</span>
+        <span class="card-value" id="liveBatteryStatus">–</span>
+        <span class="card-sub" id="liveBatteryPower">–</span>
+      </div>
+      <div class="card">
+        <span class="card-label">Health</span>
+        <span class="card-value" id="liveBatterySOH">–</span>
+      </div>
+      <div class="card">
+        <span class="card-label">Remaining Capacity</span>
+        <span class="card-value" id="liveBatteryRemaining">–</span>
+        <span class="card-sub" id="liveBatteryCycles">–</span>
+      </div>
+    </div>
+  </section>
 
   <section class="widgets" id="widgetsSection">
     <div class="widget" id="weatherWidget">

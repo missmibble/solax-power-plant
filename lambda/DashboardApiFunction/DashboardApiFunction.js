@@ -353,6 +353,10 @@ function aggregateReadings(readings, tariff) {
     };
 }
 
+// last is the most recent reading in the queried range, which always ends at
+// "now" regardless of whether range=day or range=week — so the instantaneous
+// fields below (SOC, power, health, cycles, remaining capacity) are always the
+// true latest poll, not something that changes with the day/week toggle.
 function batterySummary(first, last) {
     if (typeof first.totalDeviceCharge !== 'number' || typeof last.totalDeviceCharge !== 'number') {
         return {};
@@ -361,8 +365,21 @@ function batterySummary(first, last) {
     return {
         batteryChargeKwh: round2(last.totalDeviceCharge - first.totalDeviceCharge),
         batteryDischargeKwh: round2(last.totalDeviceDischarge - first.totalDeviceDischarge),
-        currentBatterySOC: last.batterySOC
+        currentBatterySOC: last.batterySOC,
+        currentBatteryStatus: classifyBatteryStatus(last.chargeDischargePower),
+        currentBatteryPowerW: typeof last.chargeDischargePower === 'number' ? last.chargeDischargePower : null,
+        batterySOH: typeof last.batterySOH === 'number' ? last.batterySOH : null,
+        batteryCycleTimes: typeof last.batteryCycleTimes === 'number' ? last.batteryCycleTimes : null,
+        batteryRemainingsKwh: typeof last.batteryRemainings === 'number' ? last.batteryRemainings : null
     };
+}
+
+// chargeDischargePower is +charge/-discharge in watts (docs/solax-apis.md
+// Appendix — Battery fields) — the sign alone tells us charging vs
+// discharging, no need for the coarser deviceStatus (Idle/Work) enum.
+function classifyBatteryStatus(chargeDischargePower) {
+    if (typeof chargeDischargePower !== 'number' || chargeDischargePower === 0) return 'idle';
+    return chargeDischargePower > 0 ? 'charging' : 'discharging';
 }
 
 function round2(n) {
