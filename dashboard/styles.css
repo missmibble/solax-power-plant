@@ -116,6 +116,8 @@ main {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1rem;
+  position: relative;
+  height: 280px;
 }
 
 .meta {
@@ -196,6 +198,19 @@ main {
   color: #d0021b;
   font-size: 0.85rem;
   margin: 0.5rem 0 0;
+}
+
+.battery-status-panel {
+  margin-top: 1.5rem;
+}
+
+.battery-status-panel h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+}
+
+.battery-status-panel .cards {
+  margin-bottom: 0;
 }
 
 .widgets {
@@ -395,4 +410,63 @@ main {
   align-self: flex-start;
   padding-left: 1.25rem;
   padding-right: 1.25rem;
+}
+
+@media (max-width: 640px) {
+  /* The settings table was built wide (Setting | What it does | Value) to use
+     the screen's width on desktop — on a phone there's no width to use, so it
+     collapses into one stacked card per row instead of a horizontally-scrolled
+     table. The row header (th[scope=row]) already labels each field, so the
+     column header row is redundant once stacked and is just hidden. */
+  .settings-table thead {
+    display: none;
+  }
+
+  .settings-table,
+  .settings-table tbody,
+  .settings-table tr,
+  .settings-table th,
+  .settings-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .settings-table tr {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-table tr:last-child {
+    border-bottom: none;
+  }
+
+  .settings-table th,
+  .settings-table td {
+    padding: 0.15rem 0;
+    border-bottom: none;
+    white-space: normal;
+  }
+
+  .settings-table td.value-cell {
+    padding-top: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  header {
+    padding: 1rem;
+  }
+
+  main {
+    padding: 1rem;
+  }
+
+  .settings,
+  .insights {
+    padding: 1rem;
+  }
+
+  .chart-wrap {
+    height: 220px;
+  }
 }
