@@ -178,8 +178,8 @@ describe('PollerFunction handler', () => {
             }
             return Promise.resolve([{
                 deviceSn: 'REDACTED-BATTERY-SN', deviceStatus: 1, batterySOC: 98, batterySOH: null,
-                chargeDischargePower: -352, batteryCycleTimes: 13, batteryRemainings: 18.0,
-                totalDeviceCharge: 246.2, totalDeviceDischarge: 222.2
+                chargeDischargePower: -352, batteryTemperature: 22.0, batteryCycleTimes: 13,
+                batteryRemainings: 18.0, totalDeviceCharge: 246.2, totalDeviceDischarge: 222.2
             }]);
         });
 
@@ -189,5 +189,33 @@ describe('PollerFunction handler', () => {
         const putCall = findPutCall();
         expect(putCall.input.Item.totalDeviceCharge).toBe(246.2);
         expect(putCall.input.Item.totalDeviceDischarge).toBe(222.2);
+    });
+
+    // batterySOH has consistently come back null from the live SolaX API for
+    // this account's battery (verified against 20+ consecutive polls) — swapped
+    // for batteryTemperature, which the API does report, on the dashboard's
+    // Current Battery Status panel.
+    test('maps the battery reading\'s batteryTemperature field, not the consistently-null batterySOH', async () => {
+        mockGetDeviceRealtimeData.mockImplementation((baseUrl, token, params) => {
+            if (params.deviceType === 1) {
+                return Promise.resolve([{
+                    deviceSn: 'H34ABCDEFG5001', dataTime: '2026-07-31T04:45:00.000+00:00',
+                    deviceStatus: 102, dailyYield: 22.7, totalYield: 444.9, dailyACOutput: 22.2,
+                    totalACOutput: 520.6, gridPower: 0, todayImportEnergy: 28.8, totalImportEnergy: 403.94,
+                    todayExportEnergy: 0.1, totalExportEnergy: 80.7, totalActivePower: null
+                }]);
+            }
+            return Promise.resolve([{
+                deviceSn: 'REDACTED-BATTERY-SN', deviceStatus: 1, batterySOC: 98, batterySOH: null,
+                chargeDischargePower: -352, batteryTemperature: 22.0, batteryCycleTimes: 13,
+                batteryRemainings: 18.0, totalDeviceCharge: 246.2, totalDeviceDischarge: 222.2
+            }]);
+        });
+
+        await handler();
+
+        const putCall = findPutCall();
+        expect(putCall.input.Item.batteryTemperature).toBe(22.0);
+        expect(putCall.input.Item.batterySOH).toBeUndefined();
     });
 });

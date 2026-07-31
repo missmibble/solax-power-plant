@@ -28,14 +28,11 @@ const els = {
   exportKwh: document.getElementById('exportKwh'),
   exportCredit: document.getElementById('exportCredit'),
   netCost: document.getElementById('netCost'),
-  batteryCard: document.getElementById('batteryCard'),
-  batterySOC: document.getElementById('batterySOC'),
-  batteryChargeDischarge: document.getElementById('batteryChargeDischarge'),
   batteryStatusPanelSection: document.getElementById('batteryStatusPanelSection'),
   liveBatterySOC: document.getElementById('liveBatterySOC'),
   liveBatteryStatus: document.getElementById('liveBatteryStatus'),
   liveBatteryPower: document.getElementById('liveBatteryPower'),
-  liveBatterySOH: document.getElementById('liveBatterySOH'),
+  liveBatteryTemperature: document.getElementById('liveBatteryTemperature'),
   liveBatteryRemaining: document.getElementById('liveBatteryRemaining'),
   liveBatteryCycles: document.getElementById('liveBatteryCycles'),
   weatherWidget: document.getElementById('weatherWidget'),
@@ -233,17 +230,6 @@ function render(data) {
   els.exportCredit.textContent = `${data.exportCredit} ${currency} credit`;
   els.netCost.textContent = `${data.netCost} ${currency}`;
 
-  if (typeof data.currentBatterySOC === 'number') {
-    els.batteryCard.hidden = false;
-    els.batterySOC.textContent = `${data.currentBatterySOC}% SOC`;
-    els.batteryChargeDischarge.textContent =
-      typeof data.batteryChargeKwh === 'number' && typeof data.batteryDischargeKwh === 'number'
-        ? `charged ${data.batteryChargeKwh} kWh / discharged ${data.batteryDischargeKwh} kWh`
-        : 'charge/discharge history not available for this range yet';
-  } else {
-    els.batteryCard.hidden = true;
-  }
-
   renderLiveBatteryStatus(data);
 
   els.cards.hidden = false;
@@ -266,7 +252,8 @@ function renderLiveBatteryStatus(data) {
   els.liveBatterySOC.textContent = `${data.currentBatterySOC}%`;
   els.liveBatteryStatus.textContent = formatBatteryStatusLabel(data.currentBatteryStatus);
   els.liveBatteryPower.textContent = formatBatteryPower(data.currentBatteryStatus, data.currentBatteryPowerW);
-  els.liveBatterySOH.textContent = typeof data.batterySOH === 'number' ? `${data.batterySOH}%` : '–';
+  els.liveBatteryTemperature.textContent =
+    typeof data.batteryTemperatureC === 'number' ? `${data.batteryTemperatureC}°C` : '–';
   els.liveBatteryRemaining.textContent =
     typeof data.batteryRemainingsKwh === 'number' ? `${data.batteryRemainingsKwh} kWh` : '–';
   els.liveBatteryCycles.textContent =

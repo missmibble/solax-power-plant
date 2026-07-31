@@ -356,13 +356,18 @@ function aggregateReadings(readings, tariff) {
 
 // last is the most recent reading in the queried range, which always ends at
 // "now" regardless of whether range=day or range=week — so the instantaneous
-// fields below (SOC, power, health, cycles, remaining capacity) are always the
-// true latest poll, not something that changes with the day/week toggle. They
-// only need `last` to have battery data at all — batteryChargeKwh/
+// fields below (SOC, power, temperature, cycles, remaining capacity) are always
+// the true latest poll, not something that changes with the day/week toggle.
+// They only need `last` to have battery data at all — batteryChargeKwh/
 // batteryDischargeKwh are the only fields that genuinely need both `first` and
 // `last` (they're deltas across the range), so a `first` reading that predates
 // battery polling (or predates some other gap) shouldn't block everything else
 // from showing.
+//
+// batterySOH (state of health) used to be surfaced here instead of temperature,
+// but the SolaX API has consistently returned null for it on this account's
+// battery (verified against a live API call and 20+ consecutive polls) — swapped
+// for batteryTemperature, which the API does report.
 function batterySummary(first, last) {
     if (typeof last.batterySOC !== 'number') {
         return {};
@@ -372,7 +377,7 @@ function batterySummary(first, last) {
         currentBatterySOC: last.batterySOC,
         currentBatteryStatus: classifyBatteryStatus(last.batteryDeviceStatus, last.chargeDischargePower),
         currentBatteryPowerW: typeof last.chargeDischargePower === 'number' ? last.chargeDischargePower : null,
-        batterySOH: typeof last.batterySOH === 'number' ? last.batterySOH : null,
+        batteryTemperatureC: typeof last.batteryTemperature === 'number' ? last.batteryTemperature : null,
         batteryCycleTimes: typeof last.batteryCycleTimes === 'number' ? last.batteryCycleTimes : null,
         batteryRemainingsKwh: typeof last.batteryRemainings === 'number' ? last.batteryRemainings : null
     };

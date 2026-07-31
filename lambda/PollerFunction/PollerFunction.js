@@ -129,7 +129,7 @@ exports.handler = async () => {
                     batteryDeviceSn: batteryReading.deviceSn,
                     batteryDeviceStatus: batteryReading.deviceStatus,
                     batterySOC: batteryReading.batterySOC,
-                    batterySOH: batteryReading.batterySOH,
+                    batteryTemperature: batteryReading.batteryTemperature,
                     batteryRemainings: batteryReading.batteryRemainings,
                     chargeDischargePower: batteryReading.chargeDischargePower,
                     batteryCycleTimes: batteryReading.batteryCycleTimes,
