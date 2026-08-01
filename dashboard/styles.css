@@ -412,6 +412,24 @@ main {
   padding-right: 1.25rem;
 }
 
+.settings .section-description {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.4;
+}
+
+#terminateGridDischargeButton {
+  padding: 0.6rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 @media (max-width: 640px) {
   /* The settings table was built wide (Setting | What it does | Value) to use
      the screen's width on desktop — on a phone there's no width to use, so it

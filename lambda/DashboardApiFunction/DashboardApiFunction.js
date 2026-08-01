@@ -4,7 +4,7 @@ const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, QueryCommand, GetCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
 const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
-const { logInfo, logError, importCostForWindow, exportCredit } = require('powerplant-shared');
+const { logInfo, logError, importCostForWindow, exportCredit, startOfLocalDay } = require('powerplant-shared');
 
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION });
@@ -54,6 +54,10 @@ exports.handler = async (event) => {
         return handleGetBatterySettings();
     }
 
+    if (event.resource === '/grid-discharge' && event.httpMethod === 'POST') {
+        return handleTriggerGridDischargeExit();
+    }
+
     return handleReadings(event);
 };
 
@@ -71,7 +75,13 @@ async function handleReadings(event) {
         const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
         const deviceSn = process.env.SOLAX_INVERTER_SN;
         const endSeconds = Math.floor(Date.now() / 1000);
-        const startSeconds = endSeconds - RANGE_SECONDS[range];
+        // "Today" means the local calendar day (midnight to now), not a rolling
+        // 24h window — a rolling window still shows most of yesterday's PV yield
+        // if viewed early in the morning, which reads as wrong even though the
+        // arithmetic is correct. "This week" is still a rolling 7 days.
+        const startSeconds = range === 'day'
+            ? startOfLocalDay(endSeconds, tariff.timezone)
+            : endSeconds - RANGE_SECONDS[range];
 
         const readings = await queryReadings(deviceSn, startSeconds, endSeconds);
 
@@ -200,6 +210,26 @@ async function handleTriggerAssessment() {
         return response(202, { triggered: true, message: 'Assessment started — check back in a minute or two.' });
     } catch (err) {
         logError('Failed to trigger assessment', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+// Manual "terminate discharge early" button — invokes GridDischargeFunction's
+// exit phase on demand, same InvocationType: 'Event' fire-and-forget pattern
+// as handleTriggerAssessment. Reuses the existing exit phase unchanged (it
+// already unconditionally calls exit_vpp_mode and hands control back to Self
+// Use), so this is just an on-demand trigger, not new discharge-control logic
+// — safe to press even if nothing is currently running.
+async function handleTriggerGridDischargeExit() {
+    try {
+        await lambdaClient.send(new InvokeCommand({
+            FunctionName: process.env.GRID_DISCHARGE_FUNCTION_NAME,
+            InvocationType: 'Event',
+            Payload: JSON.stringify({ phase: 'exit' })
+        }));
+        return response(202, { triggered: true, message: 'Exit requested — the inverter should return to its normal schedule shortly.' });
+    } catch (err) {
+        logError('Failed to trigger grid discharge exit', { error: err.message });
         return response(500, { message: 'Internal server error' });
     }
 }

@@ -32,8 +32,8 @@ describe('LambdaFunctionsStack', () => {
         template = Template.fromStack(lambdaStack);
     });
 
-    test('creates PollerFunction, DashboardApiFunction, AlertFunction, ReportFunction, and BatteryControlFunction', () => {
-        template.resourceCountIs('AWS::Lambda::Function', 5);
+    test('creates PollerFunction, DashboardApiFunction, AlertFunction, ReportFunction, BatteryControlFunction, GridDischargeFunction, and SettingsOptimizerFunction', () => {
+        template.resourceCountIs('AWS::Lambda::Function', 7);
     });
 
     test('schedules PollerFunction every 5 minutes via EventBridge', () => {
@@ -311,6 +311,159 @@ describe('LambdaFunctionsStack', () => {
                     Input: JSON.stringify({ sendEmail: false })
                 })
             ])
+        });
+    });
+
+    test('GridDischargeFunction gets the readings table, SolaX, tariff, and merged grid-discharge config as env vars', () => {
+        const gridDischargeConfigJson = JSON.stringify({ ...config.gridDischarge, minSoc: config.batteryControl.minSoc });
+
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.gridDischargeFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({
+                    ENERGY_READINGS_TABLE: Match.anyValue(),
+                    SOLAX_INVERTER_SN: config.solax.inverterSn,
+                    GRID_DISCHARGE_CONFIG: gridDischargeConfigJson
+                })
+            }
+        });
+    });
+
+    test('schedules GridDischargeFunction start (5pm), check (7pm), and exit (9pm) as three separate EventBridge rules', () => {
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.gridDischargeFunction.startSchedule,
+            Targets: Match.arrayWith([
+                Match.objectLike({ Input: JSON.stringify({ phase: 'start' }) })
+            ])
+        });
+
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.gridDischargeFunction.checkSchedule,
+            Targets: Match.arrayWith([
+                Match.objectLike({ Input: JSON.stringify({ phase: 'check' }) })
+            ])
+        });
+
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.gridDischargeFunction.exitSchedule,
+            Targets: Match.arrayWith([
+                Match.objectLike({ Input: JSON.stringify({ phase: 'exit' }) })
+            ])
+        });
+    });
+
+    test('GridDischargeFunction role can read SolaX SSM parameters and read/write the energy readings table', () => {
+        const policies = template.findResources('AWS::IAM::Policy', {
+            Properties: { PolicyName: Match.stringLikeRegexp('GridDischargeFunction') }
+        });
+        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
+
+        expect(statements.some(s => s.Action?.includes?.('ssm:GetParameter'))).toBe(true);
+        const dynamoStatement = statements.find(s => s.Action?.includes?.('dynamodb:PutItem'));
+        expect(dynamoStatement).toBeDefined();
+        expect(dynamoStatement.Action).toEqual(expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem']));
+    });
+
+    test('GridDischargeFunction role can publish to both SNS topics', () => {
+        const policies = template.findResources('AWS::IAM::Policy', {
+            Properties: { PolicyName: Match.stringLikeRegexp('GridDischargeFunction') }
+        });
+        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
+        const publishStatements = statements.filter(s => s.Action === 'sns:Publish');
+
+        expect(publishStatements).toHaveLength(2);
+    });
+
+    test('creates a CloudWatch alarm for GridDischargeFunction errors', () => {
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+            AlarmName: 'powerplant-GridDischarge-errors'
+        });
+    });
+
+    test('creates a POST /grid-discharge API resource requiring Cognito authorization (manual terminate-early button)', () => {
+        const resources = template.findResources('AWS::ApiGateway::Resource', {
+            Properties: { PathPart: 'grid-discharge' }
+        });
+        expect(Object.keys(resources)).toHaveLength(1);
+
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'POST',
+            AuthorizationType: 'COGNITO_USER_POOLS',
+            ResourceId: { Ref: Object.keys(resources)[0] }
+        });
+    });
+
+    test('DashboardApiFunction gets the GridDischargeFunction name as an env var (manual terminate-early button)', () => {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.dashboardApiFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({ GRID_DISCHARGE_FUNCTION_NAME: Match.anyValue() })
+            }
+        });
+    });
+
+    test('DashboardApiFunction role can invoke GridDischargeFunction (manual terminate-early button)', () => {
+        const policies = template.findResources('AWS::IAM::Policy', {
+            Properties: { PolicyName: Match.stringLikeRegexp('DashboardApiFunction') }
+        });
+        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
+        const invokeStatements = statements.filter(s => s.Action === 'lambda:InvokeFunction');
+
+        // One for ReportFunction (manual assessment trigger), one for GridDischargeFunction.
+        expect(invokeStatements.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test('SettingsOptimizerFunction gets the readings table, SolaX SN, Bedrock model, and merged optimizer config as env vars', () => {
+        const settingsOptimizerConfigJson = JSON.stringify({
+            ...config.settingsOptimizer,
+            batteryControlDefaults: {
+                chargeUpperSocSunny: config.batteryControl.chargeUpperSocSunny,
+                chargeUpperSocOvercast: config.batteryControl.chargeUpperSocOvercast
+            },
+            gridDischargeDefaults: {
+                fallbackReservePercent: config.gridDischarge.fallbackReservePercent,
+                safetyMarginPercent: config.gridDischarge.safetyMarginPercent
+            }
+        });
+
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.settingsOptimizerFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({
+                    ENERGY_READINGS_TABLE: Match.anyValue(),
+                    BEDROCK_MODEL_ID: config.bedrock.modelId,
+                    SETTINGS_OPTIMIZER_CONFIG: settingsOptimizerConfigJson
+                })
+            }
+        });
+    });
+
+    test('schedules SettingsOptimizerFunction weekly via EventBridge', () => {
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.settingsOptimizerFunction.schedule,
+            Targets: Match.arrayWith([
+                Match.objectLike({ Arn: Match.anyValue() })
+            ])
+        });
+    });
+
+    test('SettingsOptimizerFunction role can read/write the energy readings table, publish to both topics, and invoke Bedrock', () => {
+        const policies = template.findResources('AWS::IAM::Policy', {
+            Properties: { PolicyName: Match.stringLikeRegexp('SettingsOptimizerFunction') }
+        });
+        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
+
+        const dynamoStatement = statements.find(s => s.Action?.includes?.('dynamodb:PutItem'));
+        expect(dynamoStatement).toBeDefined();
+        expect(dynamoStatement.Action).toEqual(expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem']));
+
+        expect(statements.filter(s => s.Action === 'sns:Publish')).toHaveLength(2);
+        expect(statements.some(s => s.Action === 'bedrock:InvokeModel')).toBe(true);
+    });
+
+    test('creates a CloudWatch alarm for SettingsOptimizerFunction errors', () => {
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+            AlarmName: 'powerplant-SettingsOptimizer-errors'
         });
     });
 });

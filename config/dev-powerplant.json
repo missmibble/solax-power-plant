@@ -100,6 +100,28 @@
     "dischargeEndTimePeriod2": "00:00",
     "enableTimePeriod2": 0
   },
+  "gridDischarge": {
+    "dryRun": true,
+    "enabled": true,
+    "windowStartTime": "17:00",
+    "windowEndTime": "21:00",
+    "checkTime": "19:00",
+    "peakFeedInRate": 0.27,
+    "safetyMarginPercent": 10,
+    "maxDischargePowerW": 3000,
+    "minSurplusPercent": 5,
+    "historyLookbackDays": 14,
+    "minHistoryDaysRequired": 3,
+    "fallbackReservePercent": 26,
+    "assumedUsableCapacityKwh": 10
+  },
+  "settingsOptimizer": {
+    "enabled": true,
+    "autoApply": false,
+    "lookbackDays": 7,
+    "minSampleSize": 3,
+    "maxAdjustmentPercent": 15
+  },
   "ssm": {
     "solaxClientId": {
       "parameterName": "/powerplant/solax/client-id",
@@ -155,7 +177,25 @@
       "description": "Checks tomorrow's weather forecast and adjusts the inverter's grid-charge target (chargeUpperSoc) accordingly; dry-run by default",
       "assetPath": "lambda/BatteryControlFunction",
       "timer": 30,
-      "schedule": "cron(0 10 * * ? *)"
+      "schedule": "cron(30 11 * * ? *)"
+    },
+    "gridDischargeFunction": {
+      "functionName": "GridDischargeFunction",
+      "cfResource": "PowerPlantGridDischargeFunction",
+      "description": "Discharges surplus battery capacity to the grid during the premium 5-9pm feed-in window, then hands control back to Self Use; dry-run by default",
+      "assetPath": "lambda/GridDischargeFunction",
+      "timer": 30,
+      "startSchedule": "cron(0 7 * * ? *)",
+      "checkSchedule": "cron(0 9 * * ? *)",
+      "exitSchedule": "cron(0 11 * * ? *)"
+    },
+    "settingsOptimizerFunction": {
+      "functionName": "SettingsOptimizerFunction",
+      "cfResource": "PowerPlantSettingsOptimizerFunction",
+      "description": "Weekly AI assessment comparing hardcoded battery-charge and grid-discharge defaults against real usage; recommends (and optionally auto-applies) adjustments",
+      "assetPath": "lambda/SettingsOptimizerFunction",
+      "timer": 60,
+      "schedule": "cron(0 12 ? * SUN *)"
     }
   },
   "api": {

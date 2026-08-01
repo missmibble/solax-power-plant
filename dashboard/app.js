@@ -62,7 +62,9 @@ const els = {
   disabledChargeUpperSoc: document.getElementById('disabledChargeUpperSoc'),
   batterySettingsStatus: document.getElementById('batterySettingsStatus'),
   runAssessmentButton: document.getElementById('runAssessmentButton'),
-  triggerStatus: document.getElementById('triggerStatus')
+  triggerStatus: document.getElementById('triggerStatus'),
+  terminateGridDischargeButton: document.getElementById('terminateGridDischargeButton'),
+  gridDischargeStatus: document.getElementById('gridDischargeStatus')
 };
 
 let chart;
@@ -513,6 +515,23 @@ els.runAssessmentButton.addEventListener('click', async () => {
     els.triggerStatus.textContent = data.message || 'Assessment started — check back shortly.';
   } catch (err) {
     els.triggerStatus.textContent = `Couldn't trigger assessment: ${err.message}`;
+  }
+});
+
+// ─── Manual grid discharge termination ─────────────────────────────────────
+
+els.terminateGridDischargeButton.addEventListener('click', async () => {
+  els.gridDischargeStatus.hidden = false;
+  els.gridDischargeStatus.textContent = 'Requesting…';
+
+  try {
+    const res = await authorizedFetch('grid-discharge', { method: 'POST' });
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    els.gridDischargeStatus.textContent = data.message || 'Exit requested.';
+  } catch (err) {
+    els.gridDischargeStatus.textContent = `Couldn't request exit: ${err.message}`;
   }
 });
 

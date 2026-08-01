@@ -355,9 +355,11 @@ exports.handler = async () => {
         const deviceSn = process.env.SOLAX_INVERTER_SN;
         const nowSeconds = Math.floor(Date.now() / 1000);
         const dryRun = batteryControlConfig.dryRun !== false;
-        // Runs at ~20:00 local, before the 00:00-06:00 overnight charge window —
-        // whatever chargeUpperSoc is decided tonight takes effect starting that
-        // window, i.e. it applies to the calendar day that starts right after.
+        // Runs at ~21:30 local (after GridDischargeFunction's 9pm exit phase —
+        // see docs/grid-discharge-logic.md), before the 00:00-06:00 overnight
+        // charge window — whatever chargeUpperSoc is decided tonight takes
+        // effect starting that window, i.e. it applies to the calendar day
+        // that starts right after.
         const appliesToDate = localDateString(nowSeconds + 24 * 60 * 60, tariff.timezone);
 
         const settingsOverride = await loadSettingsOverride(deviceSn);

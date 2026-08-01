@@ -2,7 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { findImportRateWindow, importCostForWindow, exportCredit, localDateString } = require('../lambda/Utilities/tariff');
+const {
+    findImportRateWindow, importCostForWindow, exportCredit, localDateString, startOfLocalDay
+} = require('../lambda/Utilities/tariff');
 
 const config = JSON.parse(
     fs.readFileSync(path.join(__dirname, '..', 'config', 'dev-powerplant.json'), 'utf8')
@@ -73,6 +75,26 @@ describe('tariff', () => {
         test('rolls over to the next local day just after midnight', () => {
             // utcSeconds(24, 5) is 00:05 local on 2026-07-31
             expect(localDateString(utcSeconds(24, 5), tariff.timezone)).toBe('2026-07-31');
+        });
+    });
+
+    describe('startOfLocalDay', () => {
+        test('returns local midnight when given an early-morning timestamp', () => {
+            expect(startOfLocalDay(utcSeconds(7, 26), tariff.timezone)).toBe(utcSeconds(0, 0));
+        });
+
+        test('returns local midnight when given a late-evening timestamp on the same day', () => {
+            expect(startOfLocalDay(utcSeconds(23, 59), tariff.timezone)).toBe(utcSeconds(0, 0));
+        });
+
+        test('returns itself when already exactly local midnight', () => {
+            expect(startOfLocalDay(utcSeconds(0, 0), tariff.timezone)).toBe(utcSeconds(0, 0));
+        });
+
+        test('result falls on the same local calendar day as the input, per localDateString', () => {
+            const input = utcSeconds(14, 30);
+            const start = startOfLocalDay(input, tariff.timezone);
+            expect(localDateString(start, tariff.timezone)).toBe(localDateString(input, tariff.timezone));
         });
     });
 });

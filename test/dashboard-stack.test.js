@@ -61,14 +61,15 @@ describe('DashboardStack', () => {
         });
     });
 
-    test('routes the "readings", "insights", "battery-status", and "battery-settings" path patterns to the API origin', () => {
+    test('routes the "readings", "insights", "battery-status", "battery-settings", and "grid-discharge" path patterns to the API origin', () => {
         template.hasResourceProperties('AWS::CloudFront::Distribution', {
             DistributionConfig: Match.objectLike({
                 CacheBehaviors: Match.arrayWith([
                     Match.objectLike({ PathPattern: 'readings' }),
                     Match.objectLike({ PathPattern: 'insights' }),
                     Match.objectLike({ PathPattern: 'battery-status' }),
-                    Match.objectLike({ PathPattern: 'battery-settings' })
+                    Match.objectLike({ PathPattern: 'battery-settings' }),
+                    Match.objectLike({ PathPattern: 'grid-discharge' })
                 ])
             })
         });
@@ -78,7 +79,8 @@ describe('DashboardStack', () => {
         ['readings', Match.exact(['GET', 'HEAD'])],
         ['battery-status', Match.exact(['GET', 'HEAD'])],
         ['insights', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])],
-        ['battery-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])]
+        ['battery-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])],
+        ['grid-discharge', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])]
     ])('CloudFront behavior for "%s" allows the expected methods', (pathPattern, allowedMethodsMatcher) => {
         template.hasResourceProperties('AWS::CloudFront::Distribution', {
             DistributionConfig: Match.objectLike({

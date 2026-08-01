@@ -1,0 +1,14 @@
+{
+  "name": "settingsoptimizerfunction",
+  "version": "1.0.0",
+  "description": "Weekly AI assessment comparing hardcoded battery-charge and grid-discharge defaults against real usage; recommends (and optionally auto-applies) adjustments",
+  "type": "commonjs",
+  "main": "SettingsOptimizerFunction.js",
+  "dependencies": {
+    "@aws-sdk/client-sns": "^3.995.0",
+    "@aws-sdk/client-dynamodb": "^3.995.0",
+    "@aws-sdk/lib-dynamodb": "^3.995.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.995.0",
+    "powerplant-shared": "file:../Utilities"
+  }
+}

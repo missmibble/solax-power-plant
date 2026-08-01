@@ -62,4 +62,29 @@ function localDateString(timestampSeconds, timezone) {
     }).format(new Date(timestampSeconds * 1000));
 }
 
-module.exports = { findImportRateWindow, importCostForWindow, exportCredit, localDateString };
+// The UTC epoch seconds of local midnight on the calendar day containing
+// timestampSeconds — used by DashboardApiFunction's range=day query so
+// "Today" means the local calendar day (midnight to now), not a rolling
+// 24-hour window that still spans most of yesterday if viewed early in the
+// morning. Subtracting the local time-of-day from timestampSeconds works
+// regardless of the timezone's UTC offset, since real-world offsets are
+// always a whole number of minutes — the "seconds" component of local time
+// always equals the "seconds" component of UTC time.
+function startOfLocalDay(timestampSeconds, timezone) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23'
+    }).formatToParts(new Date(timestampSeconds * 1000));
+
+    const hour = Number(parts.find(p => p.type === 'hour').value);
+    const minute = Number(parts.find(p => p.type === 'minute').value);
+    const second = Number(parts.find(p => p.type === 'second').value);
+    const secondsSinceMidnight = hour * 3600 + minute * 60 + second;
+
+    return timestampSeconds - secondsSinceMidnight;
+}
+
+module.exports = { findImportRateWindow, importCostForWindow, exportCredit, localDateString, startOfLocalDay };
