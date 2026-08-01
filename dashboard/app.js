@@ -66,7 +66,12 @@ const els = {
   runAssessmentButton: document.getElementById('runAssessmentButton'),
   triggerStatus: document.getElementById('triggerStatus'),
   terminateGridDischargeButton: document.getElementById('terminateGridDischargeButton'),
-  gridDischargeStatus: document.getElementById('gridDischargeStatus')
+  gridDischargeStatus: document.getElementById('gridDischargeStatus'),
+  gridDischargeSettingsForm: document.getElementById('gridDischargeSettingsForm'),
+  gridDischargeEnabled: document.getElementById('gridDischargeEnabled'),
+  gridDischargeLive: document.getElementById('gridDischargeLive'),
+  gridDischargeLiveState: document.getElementById('gridDischargeLiveState'),
+  gridDischargeSettingsStatus: document.getElementById('gridDischargeSettingsStatus')
 };
 
 let chart;
@@ -161,6 +166,7 @@ function showDashboard() {
   loadInsights();
   loadBatteryStatus();
   loadBatterySettings();
+  loadGridDischargeSettings();
 }
 
 els.loginForm.addEventListener('submit', async (event) => {
@@ -542,6 +548,74 @@ els.runAssessmentButton.addEventListener('click', async () => {
     els.triggerStatus.textContent = data.message || 'Assessment started — check back shortly.';
   } catch (err) {
     els.triggerStatus.textContent = `Couldn't trigger assessment: ${err.message}`;
+  }
+});
+
+// ─── Grid discharge control settings (enabled + dry-run/live toggle) ───────
+
+async function loadGridDischargeSettings() {
+  try {
+    const res = await authorizedFetch('grid-discharge-settings');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    els.gridDischargeEnabled.checked = data.enabled;
+    els.gridDischargeLive.checked = data.dryRun === false;
+    updateGridDischargeLiveStateLabel();
+    setGridDischargeSettingsStatus('');
+  } catch (err) {
+    setGridDischargeSettingsStatus(`Couldn't load settings: ${err.message}`);
+  }
+}
+
+function setGridDischargeSettingsStatus(message) {
+  els.gridDischargeSettingsStatus.textContent = message;
+  els.gridDischargeSettingsStatus.hidden = !message;
+}
+
+function updateGridDischargeLiveStateLabel() {
+  const isLive = els.gridDischargeLive.checked;
+  els.gridDischargeLiveState.textContent = isLive ? 'LIVE — will call the inverter' : 'Dry run';
+  els.gridDischargeLiveState.classList.toggle('is-live', isLive);
+}
+
+// Same reasoning as the battery control mode toggle — this can actually
+// discharge the battery to the grid, so switching to live gets a confirm
+// step rather than flipping on the same click.
+els.gridDischargeLive.addEventListener('change', () => {
+  if (els.gridDischargeLive.checked) {
+    const confirmed = window.confirm(
+      'Switch grid discharge to LIVE? It will call the real inverter API on its next start/check/exit phase, instead of only logging what it would do.'
+    );
+    if (!confirmed) {
+      els.gridDischargeLive.checked = false;
+    }
+  }
+  updateGridDischargeLiveStateLabel();
+});
+
+els.gridDischargeSettingsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setGridDischargeSettingsStatus('Saving…');
+
+  try {
+    const res = await authorizedFetch('grid-discharge-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: els.gridDischargeEnabled.checked,
+        dryRun: !els.gridDischargeLive.checked
+      })
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Request failed: ${res.status}`);
+    }
+
+    setGridDischargeSettingsStatus('Saved — takes effect on the next start/check/exit phase.');
+  } catch (err) {
+    setGridDischargeSettingsStatus(`Couldn't save settings: ${err.message}`);
   }
 });
 

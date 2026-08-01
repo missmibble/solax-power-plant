@@ -6,7 +6,7 @@ Every automated decision this app makes, and the exact current setting driving i
 - [docs/grid-discharge-logic.md](grid-discharge-logic.md) — `GridDischargeFunction`
 - [docs/settings-optimizer-logic.md](settings-optimizer-logic.md) — `SettingsOptimizerFunction`
 
-Values below are the real deployed defaults (`config/dev-powerplant.local.json`), noted wherever the public template (`config/dev-powerplant.json`) differs. Dashboard-editable fields (via `/battery-settings`) are marked **[editable]** — those can currently be at a different, human- or `SettingsOptimizerFunction`-set value without a redeploy; the config value is only the fallback when no override row exists.
+Values below are the real deployed defaults (`config/dev-powerplant.local.json`), noted wherever the public template (`config/dev-powerplant.json`) differs. Dashboard-editable fields (via `/battery-settings` or `/grid-discharge-settings`) are marked **[editable]** — those can currently be at a different, human- or `SettingsOptimizerFunction`-set value without a redeploy; the config value is only the fallback when no override row exists.
 
 ## Tariff (`config.tariff`, `config.location.timezone`)
 
@@ -65,14 +65,15 @@ When SOC data is available for the peak window, further distinguishes "already d
 | Mid-window check | **19:00** (`checkTime`) |
 | Target basis | Worst shoulder-night (21:00–24:00) SOC drop over the last **14 days** (`historyLookbackDays`), else fallback |
 | Minimum nights required for live calc | **3** (`minHistoryDaysRequired`) |
-| Fallback reserve **[editable]** | `fallbackReservePercent` = **26%** (data-grounded from a real week of plant reports) |
-| Safety margin on top **[editable]** | `safetyMarginPercent` = **10%** |
+| Fallback reserve **[editable, `SettingsOptimizerFunction`-only — see below]** | `fallbackReservePercent` = **26%** (data-grounded from a real week of plant reports) |
+| Safety margin on top **[editable, `SettingsOptimizerFunction`-only]** | `safetyMarginPercent` = **10%** |
 | Floor shared with battery control | `minSoc` = **10%** (from `config.batteryControl`) |
 | Minimum surplus to bother discharging | `minSurplusPercent` = **5%** |
 | Max discharge power | **3000 W** |
 | Assumed usable capacity | **18.4 kWh** (public template default: 10 kWh — placeholder) |
 | Mid-window early-exit trigger | Any grid import since window opened, OR SOC already at/past target |
-| `dryRun` | **true** — logs/emails only, never calls SolaX |
+| Enabled toggle **[editable]** | `enabled` = **true** — `false` skips all three phases (start/check/exit) for the day |
+| Control mode **[editable]** | `dryRun` = **true** — logs/emails only, never calls SolaX. Dashboard toggle (red pill, confirm-gated) flips this with no redeploy |
 | Schedules | `start` **cron(0 7 \* \* ? \*)** = 17:00, `check` **cron(0 9 \* \* ? \*)** = 19:00, `exit` **cron(0 11 \* \* ? \*)** = 21:00, all Brisbane |
 
 ## SettingsOptimizerFunction — self-tuning bounds
@@ -95,7 +96,7 @@ Every control-relevant function (writes to the inverter, or writes settings that
 | Function | Flag | Current value | Dashboard-editable? |
 |---|---|---|---|
 | `BatteryControlFunction` | `dryRun` | `true` | Yes — "Control mode" toggle on `/battery-settings`, confirm-gated, no redeploy needed |
-| `GridDischargeFunction` | `dryRun` | `true` | No — config-only |
+| `GridDischargeFunction` | `dryRun` | `true` | Yes — "Control mode" toggle on `/grid-discharge-settings`, confirm-gated, no redeploy needed |
 | `SettingsOptimizerFunction` | `autoApply` | `false` | No — config-only |
 
-None of the above have been flipped live yet. Each has an explicit "known risks" / "how to validate before enabling" section in its own logic doc — read those before changing any of the three flags above. `BatteryControlFunction`'s is now a single dashboard click rather than a config edit + redeploy — see docs/battery-charge-logic.md's "Dashboard-editable settings" for what that removes in terms of built-in friction.
+None of the above have been flipped live yet. Each has an explicit "known risks" / "how to validate before enabling" section in its own logic doc — read those before changing any of the three flags above. `BatteryControlFunction`'s and `GridDischargeFunction`'s are now a single dashboard click rather than a config edit + redeploy — see the "Dashboard-editable settings" section of each function's logic doc for what that removes in terms of built-in friction. `GridDischargeFunction`'s is arguably the more consequential of the two to leave unattended, given the still-open "unconfirmed load behavior" risk in docs/grid-discharge-logic.md.

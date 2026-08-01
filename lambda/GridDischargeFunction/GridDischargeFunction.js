@@ -197,6 +197,8 @@ async function loadSettingsOverride(deviceSn) {
 
 function resolveEffectiveSettings(config, override) {
     return {
+        enabled: override?.enabled ?? config.enabled,
+        dryRun: override?.dryRun ?? (config.dryRun !== false),
         fallbackReservePercent: override?.fallbackReservePercent ?? config.fallbackReservePercent,
         safetyMarginPercent: override?.safetyMarginPercent ?? config.safetyMarginPercent
     };
@@ -280,11 +282,14 @@ function round2(n) {
 }
 
 async function handleStart(config, deviceSn, timezone, nowSeconds) {
-    if (!config.enabled) {
-        logInfo('Grid discharge disabled via config — skipping start phase');
+    const settingsOverride = await loadSettingsOverride(deviceSn);
+    const effective = resolveEffectiveSettings(config, settingsOverride);
+
+    if (!effective.enabled) {
+        logInfo('Grid discharge disabled — skipping start phase');
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
             phase: 'start', enabled: false, dryRun: null, applied: false,
-            reasoning: 'Grid discharge disabled via config.'
+            reasoning: 'Grid discharge disabled (config default or dashboard override).'
         }));
         return { statusCode: 200 };
     }
@@ -295,14 +300,11 @@ async function handleStart(config, deviceSn, timezone, nowSeconds) {
     if (!latest || typeof latest.batterySOC !== 'number') {
         logError('No recent battery SOC reading available — skipping grid discharge start phase');
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
-            phase: 'start', enabled: true, dryRun: config.dryRun, applied: false,
+            phase: 'start', enabled: true, dryRun: effective.dryRun, applied: false,
             reasoning: 'No recent battery SOC reading available — skipped.'
         }));
         return { statusCode: 200 };
     }
-
-    const settingsOverride = await loadSettingsOverride(deviceSn);
-    const effective = resolveEffectiveSettings(config, settingsOverride);
 
     const shoulderNightReserves = await historicalShoulderNightReserves(
         deviceSn, timezone, config.windowEndTime, config.historyLookbackDays, nowSeconds
@@ -324,13 +326,13 @@ async function handleStart(config, deviceSn, timezone, nowSeconds) {
         minSurplusPercent: config.minSurplusPercent
     });
 
-    const message = formatStartMessage(plan, config, config.dryRun);
-    logInfo('Grid discharge start decision', { ...plan, dryRun: config.dryRun });
+    const message = formatStartMessage(plan, config, effective.dryRun);
+    logInfo('Grid discharge start decision', { ...plan, dryRun: effective.dryRun });
 
     if (!plan.shouldDischarge) {
         await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant grid discharge — no surplus to export', message);
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
-            phase: 'start', enabled: true, dryRun: config.dryRun, applied: false,
+            phase: 'start', enabled: true, dryRun: effective.dryRun, applied: false,
             targetSocPercent: plan.targetFloorSocPercent, currentSocPercent: latest.batterySOC,
             surplusPercent: plan.surplusPercent, surplusKwh: plan.surplusKwh, dischargePowerW: 0,
             usingFallback: plan.usingFallback, shoulderNightReservePercent: plan.shoulderNightReservePercent, reasoning: message
@@ -338,7 +340,7 @@ async function handleStart(config, deviceSn, timezone, nowSeconds) {
         return { statusCode: 200 };
     }
 
-    if (config.dryRun) {
+    if (effective.dryRun) {
         await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant grid discharge — DRY RUN (no change applied)', message);
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
             phase: 'start', enabled: true, dryRun: true, applied: false,
@@ -376,11 +378,14 @@ async function handleStart(config, deviceSn, timezone, nowSeconds) {
 // 19:00). A no-op (nothing stored beyond a status record) unless today's
 // start phase actually applied a live discharge.
 async function handleCheck(config, deviceSn, timezone, nowSeconds) {
-    if (!config.enabled) {
-        logInfo('Grid discharge disabled via config — skipping check phase');
+    const settingsOverride = await loadSettingsOverride(deviceSn);
+    const effective = resolveEffectiveSettings(config, settingsOverride);
+
+    if (!effective.enabled) {
+        logInfo('Grid discharge disabled — skipping check phase');
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
             phase: 'check', enabled: false, dryRun: null, applied: false,
-            reasoning: 'Grid discharge disabled via config.'
+            reasoning: 'Grid discharge disabled (config default or dashboard override).'
         }));
         return { statusCode: 200 };
     }
@@ -392,7 +397,7 @@ async function handleCheck(config, deviceSn, timezone, nowSeconds) {
             : "Today's discharge was not applied (dry run or no surplus) — nothing to check.";
         logInfo('Grid discharge check: nothing to regulate', { reasoning });
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
-            phase: 'check', enabled: true, dryRun: config.dryRun, applied: false, reasoning
+            phase: 'check', enabled: true, dryRun: effective.dryRun, applied: false, reasoning
         }));
         return { statusCode: 200 };
     }
@@ -404,7 +409,7 @@ async function handleCheck(config, deviceSn, timezone, nowSeconds) {
     if (windowReadings.length < 2) {
         logInfo('Grid discharge check: not enough readings since the window opened to judge');
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
-            phase: 'check', enabled: true, dryRun: config.dryRun, applied: false,
+            phase: 'check', enabled: true, dryRun: effective.dryRun, applied: false,
             reasoning: 'Not enough readings since the window opened to judge — skipped.'
         }));
         return { statusCode: 200 };
@@ -422,19 +427,19 @@ async function handleCheck(config, deviceSn, timezone, nowSeconds) {
     });
 
     logInfo('Grid discharge check decision', {
-        ...decision, importSinceStartKwh, currentSocPercent, dryRun: config.dryRun
+        ...decision, importSinceStartKwh, currentSocPercent, dryRun: effective.dryRun
     });
 
     if (!decision.exitEarly) {
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
-            phase: 'check', enabled: true, dryRun: config.dryRun, applied: false,
+            phase: 'check', enabled: true, dryRun: effective.dryRun, applied: false,
             currentSocPercent, targetSocPercent: startRecord.targetSocPercent,
             reasoning: 'On track — no correction needed.'
         }));
         return { statusCode: 200 };
     }
 
-    if (config.dryRun) {
+    if (effective.dryRun) {
         await publish(
             process.env.REPORTS_TOPIC_ARN,
             'PowerPlant grid discharge — DRY RUN early exit check',
@@ -473,16 +478,19 @@ async function handleExit(config, deviceSn, nowSeconds) {
     // back to the inverter's normal Self Use schedule. Skipping it on the
     // (dry-run and/or no-surplus) common case is harmless; skipping it after a
     // real applied discharge would leave the inverter stuck in VPP override.
-    if (!config.enabled) {
-        logInfo('Grid discharge disabled via config — skipping exit phase');
+    const settingsOverride = await loadSettingsOverride(deviceSn);
+    const effective = resolveEffectiveSettings(config, settingsOverride);
+
+    if (!effective.enabled) {
+        logInfo('Grid discharge disabled — skipping exit phase');
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
             phase: 'exit', enabled: false, dryRun: null, applied: false,
-            reasoning: 'Grid discharge disabled via config.'
+            reasoning: 'Grid discharge disabled (config default or dashboard override).'
         }));
         return { statusCode: 200 };
     }
 
-    if (config.dryRun) {
+    if (effective.dryRun) {
         const message = 'Would call exit_vpp_mode to return the inverter to its normal Self Use schedule.';
         logInfo('Grid discharge exit dry run', { message });
         await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant grid discharge — DRY RUN exit (no change applied)', message);

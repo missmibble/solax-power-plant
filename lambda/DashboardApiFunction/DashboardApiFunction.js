@@ -24,6 +24,12 @@ const RANGE_SECONDS = {
 const REPORT_RECORD_PREFIX = 'REPORT#';
 const BATTERY_STATUS_RECORD_PREFIX = 'BATTERY_CONTROL#';
 const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
+// Matches GridDischargeFunction.SETTINGS_PREFIX — also written by
+// SettingsOptimizerFunction (fallbackReservePercent/safetyMarginPercent, when
+// autoApply: true), so the PUT handler below merges rather than replaces —
+// unlike battery-settings, this dashboard form doesn't own every field in
+// the row and must not clobber ones it doesn't know about.
+const GRID_DISCHARGE_SETTINGS_PREFIX = 'GRID_DISCHARGE_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
 
 // pvYieldKwh/importKwh/exportKwh are deltas of the Inverter device's cumulative
@@ -56,6 +62,14 @@ exports.handler = async (event) => {
 
     if (event.resource === '/grid-discharge' && event.httpMethod === 'POST') {
         return handleTriggerGridDischargeExit();
+    }
+
+    if (event.resource === '/grid-discharge-settings' && event.httpMethod === 'PUT') {
+        return handlePutGridDischargeSettings(event);
+    }
+
+    if (event.resource === '/grid-discharge-settings') {
+        return handleGetGridDischargeSettings();
     }
 
     return handleReadings(event);
@@ -232,6 +246,74 @@ async function handleTriggerGridDischargeExit() {
         logError('Failed to trigger grid discharge exit', { error: err.message });
         return response(500, { message: 'Internal server error' });
     }
+}
+
+// Dashboard-editable enabled/dryRun for GridDischargeFunction — same
+// sentinel-key settings row it reads (GridDischargeFunction.loadSettingsOverride),
+// which SettingsOptimizerFunction can also write to (fallbackReservePercent/
+// safetyMarginPercent, autoApply only). This dashboard form only ever edits
+// enabled/dryRun, so unlike battery-settings the PUT handler merges over the
+// existing row instead of replacing it outright.
+async function handleGetGridDischargeSettings() {
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const result = await docClient.send(new GetCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            Key: { DeviceSn: `${GRID_DISCHARGE_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP }
+        }));
+        return response(200, formatGridDischargeSettingsResponse(result.Item));
+    } catch (err) {
+        logError('Grid discharge settings query failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+async function handlePutGridDischargeSettings(event) {
+    let body;
+    try {
+        body = JSON.parse(event.body || '{}');
+    } catch {
+        return response(400, { message: 'Request body must be valid JSON' });
+    }
+
+    const validationError = validateGridDischargeSettings(body);
+    if (validationError) {
+        return response(400, { message: validationError });
+    }
+
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const key = { DeviceSn: `${GRID_DISCHARGE_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP };
+
+        const existing = await docClient.send(new GetCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Key: key }));
+        const item = {
+            ...existing.Item,
+            ...key,
+            enabled: body.enabled,
+            dryRun: body.dryRun
+        };
+
+        await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
+        logInfo('Grid discharge settings updated', item);
+        return response(200, formatGridDischargeSettingsResponse(item));
+    } catch (err) {
+        logError('Grid discharge settings update failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+function validateGridDischargeSettings(body) {
+    if (typeof body.enabled !== 'boolean') return 'enabled must be a boolean';
+    if (typeof body.dryRun !== 'boolean') return 'dryRun must be a boolean';
+    return null;
+}
+
+function formatGridDischargeSettingsResponse(item) {
+    return {
+        enabled: item?.enabled ?? (process.env.GRID_DISCHARGE_DEFAULT_ENABLED !== 'false'),
+        dryRun: item?.dryRun ?? (process.env.GRID_DISCHARGE_DEFAULT_DRY_RUN !== 'false'),
+        usingDefaults: !item
+    };
 }
 
 // Dashboard-editable overrides for BatteryControlFunction's nightly decision —
@@ -453,3 +535,5 @@ module.exports.formatInsightsResponse = formatInsightsResponse;
 module.exports.formatBatteryStatusResponse = formatBatteryStatusResponse;
 module.exports.formatBatterySettingsResponse = formatBatterySettingsResponse;
 module.exports.validateBatterySettings = validateBatterySettings;
+module.exports.formatGridDischargeSettingsResponse = formatGridDischargeSettingsResponse;
+module.exports.validateGridDischargeSettings = validateGridDischargeSettings;

@@ -7,7 +7,9 @@ const {
     formatInsightsResponse,
     formatBatteryStatusResponse,
     formatBatterySettingsResponse,
-    validateBatterySettings
+    validateBatterySettings,
+    formatGridDischargeSettingsResponse,
+    validateGridDischargeSettings
 } = require('../lambda/DashboardApiFunction/DashboardApiFunction');
 
 const config = JSON.parse(
@@ -350,5 +352,69 @@ describe('DashboardApiFunction validateBatterySettings', () => {
         expect(validateBatterySettings({
             enabled: true, dryRun: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 0
         })).toBeNull();
+    });
+});
+
+describe('DashboardApiFunction formatGridDischargeSettingsResponse', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+        process.env = {
+            ...originalEnv,
+            GRID_DISCHARGE_DEFAULT_ENABLED: 'true',
+            GRID_DISCHARGE_DEFAULT_DRY_RUN: 'true'
+        };
+    });
+
+    afterEach(() => {
+        process.env = originalEnv;
+    });
+
+    test('falls back to the config defaults when no override has been saved', () => {
+        expect(formatGridDischargeSettingsResponse(undefined)).toEqual({
+            enabled: true,
+            dryRun: true,
+            usingDefaults: true
+        });
+    });
+
+    test('uses the saved override values when present', () => {
+        expect(formatGridDischargeSettingsResponse({ enabled: false, dryRun: false })).toEqual({
+            enabled: false,
+            dryRun: false,
+            usingDefaults: false
+        });
+    });
+
+    test('falls back to config defaults for enabled/dryRun even when the row has other fields set (e.g. by SettingsOptimizerFunction)', () => {
+        expect(formatGridDischargeSettingsResponse({ fallbackReservePercent: 30, safetyMarginPercent: 15 })).toEqual({
+            enabled: true,
+            dryRun: true,
+            usingDefaults: false
+        });
+    });
+
+    test('falls back to disabled/live defaults when the env vars say so', () => {
+        process.env.GRID_DISCHARGE_DEFAULT_ENABLED = 'false';
+        process.env.GRID_DISCHARGE_DEFAULT_DRY_RUN = 'false';
+        expect(formatGridDischargeSettingsResponse(undefined)).toEqual({
+            enabled: false,
+            dryRun: false,
+            usingDefaults: true
+        });
+    });
+});
+
+describe('DashboardApiFunction validateGridDischargeSettings', () => {
+    test('accepts a valid payload', () => {
+        expect(validateGridDischargeSettings({ enabled: true, dryRun: false })).toBeNull();
+    });
+
+    test('rejects a non-boolean enabled field', () => {
+        expect(validateGridDischargeSettings({ enabled: 'yes', dryRun: true })).toMatch(/enabled/);
+    });
+
+    test('rejects a non-boolean dryRun field', () => {
+        expect(validateGridDischargeSettings({ enabled: true, dryRun: 'no' })).toMatch(/dryRun/);
     });
 });

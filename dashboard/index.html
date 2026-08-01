@@ -211,6 +211,52 @@
 
   <section class="settings" id="gridDischargeSection">
     <h2>Grid Discharge Control</h2>
+    <form id="gridDischargeSettingsForm">
+      <div class="settings-table-wrap">
+        <table class="settings-table">
+          <thead>
+            <tr>
+              <th scope="col">Setting</th>
+              <th scope="col">What it does</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><label for="gridDischargeEnabled">Evening discharge enabled</label></th>
+              <td>
+                When off, the 5-9pm feed-in discharge is skipped entirely — start, check, and exit all
+                leave the battery on its normal Self Use schedule instead.
+              </td>
+              <td class="value-cell">
+                <label class="toggle-pill">
+                  <input type="checkbox" id="gridDischargeEnabled">
+                  <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
+                </label>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><label for="gridDischargeLive">Control mode</label></th>
+              <td>
+                Dry run only logs and emails what each phase (start/check/exit) would do, without ever
+                calling the inverter. Live enables actually discharge to the grid.
+              </td>
+              <td class="value-cell">
+                <label class="toggle-pill toggle-pill--danger">
+                  <input type="checkbox" id="gridDischargeLive">
+                  <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
+                </label>
+                <span class="toggle-pill-state" id="gridDischargeLiveState">Dry run</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <button type="submit">Save settings</button>
+      <p id="gridDischargeSettingsStatus" class="status" hidden></p>
+    </form>
+
     <p class="section-description">
       If the evening feed-in discharge (5-9pm) is running and you want to stop it early — e.g. before an
       expected spike in household demand — this returns the inverter to its normal schedule immediately.

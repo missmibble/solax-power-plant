@@ -246,22 +246,38 @@ describe('GridDischargeFunction', () => {
         test('falls back to config defaults when there is no saved override', () => {
             const effective = resolveEffectiveSettings(BASE_CONFIG, null);
             expect(effective).toEqual({
+                enabled: BASE_CONFIG.enabled,
+                dryRun: true,
                 fallbackReservePercent: BASE_CONFIG.fallbackReservePercent,
                 safetyMarginPercent: BASE_CONFIG.safetyMarginPercent
             });
         });
 
         test('uses the override values when present', () => {
-            const effective = resolveEffectiveSettings(BASE_CONFIG, { fallbackReservePercent: 30, safetyMarginPercent: 15 });
-            expect(effective).toEqual({ fallbackReservePercent: 30, safetyMarginPercent: 15 });
+            const effective = resolveEffectiveSettings(BASE_CONFIG, {
+                enabled: false, dryRun: false, fallbackReservePercent: 30, safetyMarginPercent: 15
+            });
+            expect(effective).toEqual({ enabled: false, dryRun: false, fallbackReservePercent: 30, safetyMarginPercent: 15 });
         });
 
-        test('merges a partial override with config defaults for the untouched field', () => {
+        test('merges a partial override with config defaults for the untouched fields', () => {
             const effective = resolveEffectiveSettings(BASE_CONFIG, { fallbackReservePercent: 30 });
             expect(effective).toEqual({
+                enabled: BASE_CONFIG.enabled,
+                dryRun: true,
                 fallbackReservePercent: 30,
                 safetyMarginPercent: BASE_CONFIG.safetyMarginPercent
             });
+        });
+
+        test('a dryRun: false override takes effect even when config.dryRun is true', () => {
+            const effective = resolveEffectiveSettings({ ...BASE_CONFIG, dryRun: true }, { dryRun: false });
+            expect(effective.dryRun).toBe(false);
+        });
+
+        test('an enabled: false override takes effect even when config.enabled is true', () => {
+            const effective = resolveEffectiveSettings({ ...BASE_CONFIG, enabled: true }, { enabled: false });
+            expect(effective.enabled).toBe(false);
         });
     });
 
@@ -417,6 +433,41 @@ describe('GridDischargeFunction', () => {
 
             const putCall = findPutCall();
             expect(putCall.input.Item.targetSocPercent).toBe(55); // minSoc(10) + override fallback(30) + override safety margin(15)
+        });
+
+        test('skips entirely and stores a disabled record when a saved settings override sets enabled: false, even though config.enabled is true', async () => {
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({ Item: { enabled: false } });
+                return defaultDynamoImpl(command);
+            });
+
+            const result = await handler({ phase: 'start' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSetInverterSocTargetMode).not.toHaveBeenCalled();
+            const putCall = findPutCall();
+            expect(putCall.input.Item.enabled).toBe(false);
+        });
+
+        test('uses a saved settings override for dryRun: false to go live even though config.dryRun is true', async () => {
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({ Item: { dryRun: false } });
+                if (command.__type !== 'Query') return Promise.resolve({});
+                const { ':start': start, ':end': end } = command.input.ExpressionAttributeValues;
+                if (end - start <= 900) return Promise.resolve({ Items: [{ batterySOC: 90, batteryRemainings: 16.5 }] });
+                return Promise.resolve({ Items: [] });
+            });
+            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
+            mockGetAccessToken.mockResolvedValue('access-token');
+            mockSetInverterSocTargetMode.mockResolvedValue({ 'H34ABCDEFG5001': { status: 4 } });
+
+            const result = await handler({ phase: 'start' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSetInverterSocTargetMode).toHaveBeenCalledTimes(1);
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dryRun).toBe(false);
+            expect(putCall.input.Item.applied).toBe(true);
         });
     });
 

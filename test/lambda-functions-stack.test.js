@@ -88,6 +88,18 @@ describe('LambdaFunctionsStack', () => {
         }
     });
 
+    test('DashboardApiFunction gets grid-discharge-settings defaults (enabled + dry-run) as env vars, sourced from config.gridDischarge', () => {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.dashboardApiFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({
+                    GRID_DISCHARGE_DEFAULT_ENABLED: String(config.gridDischarge.enabled),
+                    GRID_DISCHARGE_DEFAULT_DRY_RUN: String(config.gridDischarge.dryRun !== false)
+                })
+            }
+        });
+    });
+
     test('DashboardApiFunction gets battery-settings defaults (including dry-run) as env vars, sourced from config.batteryControl', () => {
         template.hasResourceProperties('AWS::Lambda::Function', {
             FunctionName: config.lambda.dashboardApiFunction.functionName,
@@ -404,6 +416,14 @@ describe('LambdaFunctionsStack', () => {
             HttpMethod: 'POST',
             AuthorizationType: 'COGNITO_USER_POOLS',
             ResourceId: { Ref: Object.keys(resources)[0] }
+        });
+    });
+
+    test('creates a /grid-discharge-settings API resource with GET and PUT methods', () => {
+        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'grid-discharge-settings' });
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'PUT',
+            AuthorizationType: 'COGNITO_USER_POOLS'
         });
     });
 
