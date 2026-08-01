@@ -208,24 +208,37 @@ describe('BatteryControlFunction', () => {
         test('falls back to config defaults when there is no saved override', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
             expect(effective).toEqual({
-                enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+                enabled: true, dryRun: true,
+                chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
             });
         });
 
         test('uses the override values when present', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, {
-                enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+                enabled: false, dryRun: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
             });
             expect(effective).toEqual({
-                enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+                enabled: false, dryRun: false,
+                chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
             });
         });
 
         test('merges a partial override with config defaults for the untouched fields', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, { enabled: false });
             expect(effective).toEqual({
-                enabled: false, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+                enabled: false, dryRun: true,
+                chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
             });
+        });
+
+        test('a dryRun: false override takes effect even when config.batteryControl.dryRun is true', () => {
+            const effective = resolveEffectiveSettings({ ...BASELINE_CONFIG, dryRun: true }, { dryRun: false });
+            expect(effective.dryRun).toBe(false);
+        });
+
+        test('falls back to config.batteryControl.dryRun when the override omits it', () => {
+            const effective = resolveEffectiveSettings({ ...BASELINE_CONFIG, dryRun: false }, { enabled: false });
+            expect(effective.dryRun).toBe(false);
         });
     });
 
@@ -369,6 +382,32 @@ describe('BatteryControlFunction', () => {
 
             const putCall = findPutCall();
             expect(putCall.input.Item.chargeUpperSoc).toBe(25); // overridden sunny target, not the config's 40
+        });
+
+        test('uses a dashboard-saved dryRun: false override to go live even though config.batteryControl.dryRun is true', async () => {
+            process.env.BATTERY_CONTROL_CONFIG = JSON.stringify({ ...BASELINE_CONFIG, dryRun: true });
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({ Item: { enabled: true, dryRun: false } });
+                if (command.__type === 'Query') return Promise.resolve({ Items: [] });
+                return Promise.resolve({});
+            });
+            ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
+
+            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
+            global.fetch.mockResolvedValue({
+                json: async () => ({ cod: '200', list: [tomorrowSlot()] }) // clear -> sunny -> 40%
+            });
+            mockGetAccessToken.mockResolvedValue('access-token');
+            mockSetInverterSelfUseMode.mockResolvedValue({ [process.env.SOLAX_INVERTER_SN]: { status: 0 } });
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSetInverterSelfUseMode).toHaveBeenCalledTimes(1);
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dryRun).toBe(false);
+            expect(putCall.input.Item.applied).toBe(true);
         });
 
         test('skips the weather/forecast lookup but still dry-run-decides the disabled default when the dashboard toggle is off', async () => {

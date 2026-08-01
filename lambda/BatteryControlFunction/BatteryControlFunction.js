@@ -221,6 +221,7 @@ async function loadSettingsOverride(deviceSn) {
 function resolveEffectiveSettings(batteryControlConfig, override) {
     return {
         enabled: override?.enabled ?? true,
+        dryRun: override?.dryRun ?? (batteryControlConfig.dryRun !== false),
         chargeUpperSocSunny: override?.chargeUpperSocSunny ?? batteryControlConfig.chargeUpperSocSunny,
         chargeUpperSocOvercast: override?.chargeUpperSocOvercast ?? batteryControlConfig.chargeUpperSocOvercast,
         disabledChargeUpperSoc: override?.disabledChargeUpperSoc ?? batteryControlConfig.disabledChargeUpperSoc
@@ -354,7 +355,6 @@ exports.handler = async () => {
         const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
         const deviceSn = process.env.SOLAX_INVERTER_SN;
         const nowSeconds = Math.floor(Date.now() / 1000);
-        const dryRun = batteryControlConfig.dryRun !== false;
         // Runs at ~21:30 local (after GridDischargeFunction's 9pm exit phase —
         // see docs/grid-discharge-logic.md), before the 00:00-06:00 overnight
         // charge window — whatever chargeUpperSoc is decided tonight takes
@@ -364,6 +364,7 @@ exports.handler = async () => {
 
         const settingsOverride = await loadSettingsOverride(deviceSn);
         const effective = resolveEffectiveSettings(batteryControlConfig, settingsOverride);
+        const dryRun = effective.dryRun;
         const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds);
 
         let classification;

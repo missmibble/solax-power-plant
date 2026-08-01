@@ -57,6 +57,8 @@ const els = {
   previousAssessmentText: document.getElementById('previousAssessmentText'),
   batterySettingsForm: document.getElementById('batterySettingsForm'),
   batteryControlEnabled: document.getElementById('batteryControlEnabled'),
+  batteryControlLive: document.getElementById('batteryControlLive'),
+  batteryControlLiveState: document.getElementById('batteryControlLiveState'),
   chargeUpperSocSunny: document.getElementById('chargeUpperSocSunny'),
   chargeUpperSocOvercast: document.getElementById('chargeUpperSocOvercast'),
   disabledChargeUpperSoc: document.getElementById('disabledChargeUpperSoc'),
@@ -460,6 +462,8 @@ async function loadBatterySettings() {
 
     const data = await res.json();
     els.batteryControlEnabled.checked = data.enabled;
+    els.batteryControlLive.checked = data.dryRun === false;
+    updateLiveStateLabel();
     els.chargeUpperSocSunny.value = data.chargeUpperSocSunny;
     els.chargeUpperSocOvercast.value = data.chargeUpperSocOvercast;
     els.disabledChargeUpperSoc.value = data.disabledChargeUpperSoc;
@@ -474,6 +478,28 @@ function setBatterySettingsStatus(message) {
   els.batterySettingsStatus.hidden = !message;
 }
 
+function updateLiveStateLabel() {
+  const isLive = els.batteryControlLive.checked;
+  els.batteryControlLiveState.textContent = isLive ? 'LIVE — will call the inverter' : 'Dry run';
+  els.batteryControlLiveState.classList.toggle('is-live', isLive);
+}
+
+// Switching to live is the one settings change here that can actually move
+// the inverter, so it gets a confirm step rather than silently flipping on
+// the same click — same caution as any other "make this actually control
+// hardware" action in this app.
+els.batteryControlLive.addEventListener('change', () => {
+  if (els.batteryControlLive.checked) {
+    const confirmed = window.confirm(
+      'Switch battery control to LIVE? It will call the real inverter API on its next nightly run, instead of only logging what it would do.'
+    );
+    if (!confirmed) {
+      els.batteryControlLive.checked = false;
+    }
+  }
+  updateLiveStateLabel();
+});
+
 els.batterySettingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBatterySettingsStatus('Saving…');
@@ -484,6 +510,7 @@ els.batterySettingsForm.addEventListener('submit', async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         enabled: els.batteryControlEnabled.checked,
+        dryRun: !els.batteryControlLive.checked,
         chargeUpperSocSunny: Number(els.chargeUpperSocSunny.value),
         chargeUpperSocOvercast: Number(els.chargeUpperSocOvercast.value),
         disabledChargeUpperSoc: Number(els.disabledChargeUpperSoc.value)

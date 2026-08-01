@@ -145,7 +145,28 @@
                 instead the battery is held at the "Default charge when disabled" target below, every night,
                 until this is switched back on. Independent of dry-run mode.
               </td>
-              <td class="value-cell"><input type="checkbox" id="batteryControlEnabled"></td>
+              <td class="value-cell">
+                <label class="toggle-pill">
+                  <input type="checkbox" id="batteryControlEnabled">
+                  <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
+                </label>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><label for="batteryControlLive">Control mode</label></th>
+              <td>
+                Dry run only logs and emails what tonight's charge decision would do, without ever calling
+                the inverter. Live allows it to actually apply that decision. Independent of the enabled
+                toggle above — a disabled-but-live run still applies the "Default charge when disabled"
+                target for real.
+              </td>
+              <td class="value-cell">
+                <label class="toggle-pill toggle-pill--danger">
+                  <input type="checkbox" id="batteryControlLive">
+                  <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
+                </label>
+                <span class="toggle-pill-state" id="batteryControlLiveState">Dry run</span>
+              </td>
             </tr>
             <tr>
               <th scope="row"><label for="chargeUpperSocSunny">Sunny forecast charge target</label></th>

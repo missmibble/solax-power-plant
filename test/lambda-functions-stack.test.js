@@ -88,6 +88,20 @@ describe('LambdaFunctionsStack', () => {
         }
     });
 
+    test('DashboardApiFunction gets battery-settings defaults (including dry-run) as env vars, sourced from config.batteryControl', () => {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.dashboardApiFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({
+                    BATTERY_CONTROL_DEFAULT_SUNNY: String(config.batteryControl.chargeUpperSocSunny),
+                    BATTERY_CONTROL_DEFAULT_OVERCAST: String(config.batteryControl.chargeUpperSocOvercast),
+                    BATTERY_CONTROL_DEFAULT_DISABLED: String(config.batteryControl.disabledChargeUpperSoc),
+                    BATTERY_CONTROL_DEFAULT_DRY_RUN: String(config.batteryControl.dryRun !== false)
+                })
+            }
+        });
+    });
+
     test('AlertFunction role can query the energy readings table (not just stream permissions)', () => {
         template.hasResourceProperties('AWS::IAM::Policy', {
             PolicyName: Match.stringLikeRegexp('AlertFunction'),

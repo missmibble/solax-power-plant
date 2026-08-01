@@ -54,7 +54,7 @@ When SOC data is available for the peak window, further distinguishes "already d
 | Minimum SOC floor | `minSoc` = **10%** (not dashboard-editable) |
 | Charge-from-grid | Enabled, window **00:00–06:00** (not dashboard-editable) |
 | Enabled toggle **[editable]** | `enabled` = **true** — `false` skips forecasting and holds `disabledChargeUpperSoc` every night |
-| `dryRun` | **true** — logs/emails only, never calls SolaX |
+| Control mode **[editable]** | `dryRun` = **true** — logs/emails only, never calls SolaX. Dashboard toggle (red pill, confirm-gated) flips this with no redeploy |
 | Schedule | **cron(30 11 \* \* ? \*)** = 21:30 Brisbane |
 
 ## GridDischargeFunction — evening export target
@@ -92,10 +92,10 @@ Reviews the four **[editable]** values above (`chargeUpperSocSunny`, `chargeUppe
 
 Every control-relevant function (writes to the inverter, or writes settings that influence what another function writes) defaults to a non-destructive mode:
 
-| Function | Flag | Current value |
-|---|---|---|
-| `BatteryControlFunction` | `dryRun` | `true` |
-| `GridDischargeFunction` | `dryRun` | `true` |
-| `SettingsOptimizerFunction` | `autoApply` | `false` |
+| Function | Flag | Current value | Dashboard-editable? |
+|---|---|---|---|
+| `BatteryControlFunction` | `dryRun` | `true` | Yes — "Control mode" toggle on `/battery-settings`, confirm-gated, no redeploy needed |
+| `GridDischargeFunction` | `dryRun` | `true` | No — config-only |
+| `SettingsOptimizerFunction` | `autoApply` | `false` | No — config-only |
 
-None of the above have been flipped live yet. Each has an explicit "known risks" / "how to validate before enabling" section in its own logic doc — read those before changing any of the three flags above.
+None of the above have been flipped live yet. Each has an explicit "known risks" / "how to validate before enabling" section in its own logic doc — read those before changing any of the three flags above. `BatteryControlFunction`'s is now a single dashboard click rather than a config edit + redeploy — see docs/battery-charge-logic.md's "Dashboard-editable settings" for what that removes in terms of built-in friction.

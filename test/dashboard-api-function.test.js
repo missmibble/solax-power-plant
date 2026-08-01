@@ -278,7 +278,8 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
             ...originalEnv,
             BATTERY_CONTROL_DEFAULT_SUNNY: '40',
             BATTERY_CONTROL_DEFAULT_OVERCAST: '100',
-            BATTERY_CONTROL_DEFAULT_DISABLED: '100'
+            BATTERY_CONTROL_DEFAULT_DISABLED: '100',
+            BATTERY_CONTROL_DEFAULT_DRY_RUN: 'true'
         };
     });
 
@@ -289,6 +290,7 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
     test('falls back to the config defaults when no override has been saved', () => {
         expect(formatBatterySettingsResponse(undefined)).toEqual({
             enabled: true,
+            dryRun: true,
             chargeUpperSocSunny: 40,
             chargeUpperSocOvercast: 100,
             disabledChargeUpperSoc: 100,
@@ -297,28 +299,42 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
     });
 
     test('uses the saved override values when present', () => {
-        const item = { enabled: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80 };
+        const item = {
+            enabled: false, dryRun: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+        };
         expect(formatBatterySettingsResponse(item)).toEqual({
             enabled: false,
+            dryRun: false,
             chargeUpperSocSunny: 25,
             chargeUpperSocOvercast: 90,
             disabledChargeUpperSoc: 80,
             usingDefaults: false
         });
     });
+
+    test('falls back to a live default (dryRun: false) when BATTERY_CONTROL_DEFAULT_DRY_RUN is "false"', () => {
+        process.env.BATTERY_CONTROL_DEFAULT_DRY_RUN = 'false';
+        expect(formatBatterySettingsResponse(undefined).dryRun).toBe(false);
+    });
 });
 
 describe('DashboardApiFunction validateBatterySettings', () => {
     test('accepts a valid payload', () => {
         expect(validateBatterySettings({
-            enabled: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            enabled: true, dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
         })).toBeNull();
     });
 
     test('rejects a non-boolean enabled field', () => {
         expect(validateBatterySettings({
-            enabled: 'yes', chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            enabled: 'yes', dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
         })).toMatch(/enabled/);
+    });
+
+    test('rejects a non-boolean dryRun field', () => {
+        expect(validateBatterySettings({
+            enabled: true, dryRun: 'no', chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+        })).toMatch(/dryRun/);
     });
 
     test.each([
@@ -326,13 +342,13 @@ describe('DashboardApiFunction validateBatterySettings', () => {
         [undefined, 100, 100], [40, 100, -1], [40, 100, 101], [40, 100, undefined]
     ])('rejects out-of-range or non-numeric percentages (%p, %p, %p)', (sunny, overcast, disabled) => {
         expect(validateBatterySettings({
-            enabled: true, chargeUpperSocSunny: sunny, chargeUpperSocOvercast: overcast, disabledChargeUpperSoc: disabled
+            enabled: true, dryRun: true, chargeUpperSocSunny: sunny, chargeUpperSocOvercast: overcast, disabledChargeUpperSoc: disabled
         })).toEqual(expect.any(String));
     });
 
     test('accepts boundary values 0 and 100', () => {
         expect(validateBatterySettings({
-            enabled: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 0
+            enabled: true, dryRun: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 0
         })).toBeNull();
     });
 });
