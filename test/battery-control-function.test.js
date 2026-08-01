@@ -315,7 +315,7 @@ describe('BatteryControlFunction', () => {
             const publishCall = mockSnsSend.mock.calls[0][0];
             expect(publishCall.input.TopicArn).toBe(process.env.REPORTS_TOPIC_ARN);
             expect(publishCall.input.Subject).toContain('DRY RUN');
-            expect(publishCall.input.Message).toContain('Would set chargeUpperSoc to 100');
+            expect(publishCall.input.Message).toContain("Would set tonight's battery charge target to 100%");
 
             const putCall = findPutCall();
             expect(putCall.input.TableName).toBe(process.env.ENERGY_READINGS_TABLE);
@@ -353,7 +353,7 @@ describe('BatteryControlFunction', () => {
 
             const publishCall = mockSnsSend.mock.calls[0][0];
             expect(publishCall.input.Subject).toContain('applied');
-            expect(publishCall.input.Message).toContain('Set chargeUpperSoc to 40');
+            expect(publishCall.input.Message).toContain("Set tonight's battery charge target to 40%");
 
             const putCall = findPutCall();
             expect(putCall.input.Item.classification).toBe('sunny');

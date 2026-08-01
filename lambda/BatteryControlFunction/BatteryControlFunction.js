@@ -162,12 +162,12 @@ function buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc) {
 }
 
 function formatMessage(classification, reasoning, requestBody, dryRun) {
+    const classificationLabel = classification === 'disabled' ? 'Automation disabled' : `Tomorrow's forecast: ${classification}`;
     return [
-        `Forecast classification: ${classification}`,
-        `Reasoning: ${reasoning}`,
-        `${dryRun ? 'Would set' : 'Set'} chargeUpperSoc to ${requestBody.chargeUpperSoc}%`,
+        classificationLabel,
+        reasoning,
         '',
-        `Full request body: ${JSON.stringify(requestBody)}`
+        `${dryRun ? 'Would set' : 'Set'} tonight's battery charge target to ${requestBody.chargeUpperSoc}%.`
     ].join('\n');
 }
 

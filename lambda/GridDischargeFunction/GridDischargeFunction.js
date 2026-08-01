@@ -159,21 +159,21 @@ function computeDischargePlan({ currentSocPercent, minSocPercent, safetyMarginPe
 
 function formatStartMessage(plan, config, dryRun) {
     const lines = [
-        `Current SOC target floor: ${plan.targetFloorSocPercent}% ` +
-        `(minSoc ${config.minSoc}% + shoulder-night reserve ${plan.shoulderNightReservePercent}%` +
-        `${plan.usingFallback ? ' [fallback — insufficient history]' : ''} + safety margin ${config.safetyMarginPercent}%)`,
-        `Surplus available to export: ${plan.surplusPercent}% (~${plan.surplusKwh} kWh)`
+        `Battery charge floor for tonight: ${plan.targetFloorSocPercent}% ` +
+        `(minimum reserve ${config.minSoc}% + overnight buffer ${plan.shoulderNightReservePercent}%` +
+        `${plan.usingFallback ? ' [estimated — not enough history yet]' : ''} + safety margin ${config.safetyMarginPercent}%)`,
+        `Spare capacity available to export: ${plan.surplusPercent}% (~${plan.surplusKwh} kWh)`
     ];
 
     if (plan.shouldDischarge) {
         lines.push(
-            `${dryRun ? 'Would set' : 'Set'} targetSoc=${plan.targetFloorSocPercent}%, ` +
-            `discharge power ${plan.dischargePowerW}W`,
+            `${dryRun ? 'Would export' : 'Exporting'} down to ${plan.targetFloorSocPercent}% battery charge, ` +
+            `at ${plan.dischargePowerW}W`,
             `Estimated feed-in revenue: ~$${round2(plan.surplusKwh * config.peakFeedInRate)} ` +
             `at ${(config.peakFeedInRate * 100).toFixed(0)}c/kWh`
         );
     } else {
-        lines.push('No meaningful surplus — battery already at or below the target floor, nothing to discharge.');
+        lines.push('No spare capacity to export — battery is already at or below the target reserve.');
     }
 
     return lines.join('\n');
@@ -231,14 +231,14 @@ function shouldExitEarly({ importSinceStartKwh, currentSocPercent, targetSocPerc
     if (importSinceStartKwh > 0) {
         return {
             exitEarly: true,
-            reason: `Grid import detected (${round2(importSinceStartKwh)} kWh) since the discharge window opened — ` +
-                'demand outpaced the planned discharge rate.'
+            reason: `Grid import detected (${round2(importSinceStartKwh)} kWh) since the export window opened — ` +
+                'household usage outpaced the planned export rate.'
         };
     }
     if (currentSocPercent <= targetSocPercent) {
         return {
             exitEarly: true,
-            reason: `SOC has already reached the target (${currentSocPercent}% <= ${targetSocPercent}%) — no more surplus to export.`
+            reason: `Battery has already reached the target charge level (${currentSocPercent}% <= ${targetSocPercent}%) — no more spare capacity to export.`
         };
     }
     return { exitEarly: false, reason: null };
@@ -443,7 +443,7 @@ async function handleCheck(config, deviceSn, timezone, nowSeconds) {
         await publish(
             process.env.REPORTS_TOPIC_ARN,
             'PowerPlant grid discharge — DRY RUN early exit check',
-            `${decision.reason} Would exit VPP mode early.`
+            `${decision.reason} Would end the grid export early and return to the normal daily schedule.`
         );
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
             phase: 'check', enabled: true, dryRun: true, applied: false,
@@ -462,7 +462,7 @@ async function handleCheck(config, deviceSn, timezone, nowSeconds) {
     await publish(
         process.env.REPORTS_TOPIC_ARN,
         'PowerPlant grid discharge — early exit applied',
-        `${decision.reason} Exited VPP mode early.`
+        `${decision.reason} Ended the grid export early and returned to the normal daily schedule.`
     );
     await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
         phase: 'check', enabled: true, dryRun: false, applied: true,
@@ -491,7 +491,7 @@ async function handleExit(config, deviceSn, nowSeconds) {
     }
 
     if (effective.dryRun) {
-        const message = 'Would call exit_vpp_mode to return the inverter to its normal Self Use schedule.';
+        const message = 'Would return the battery to its normal daily schedule.';
         logInfo('Grid discharge exit dry run', { message });
         await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant grid discharge — DRY RUN exit (no change applied)', message);
         await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {
@@ -507,7 +507,7 @@ async function handleExit(config, deviceSn, nowSeconds) {
 
     await exitVppMode(baseUrl, accessToken, { snList: deviceSn, businessType });
 
-    const message = 'Exited VPP mode — inverter returned to its normal Self Use schedule.';
+    const message = 'Battery returned to its normal daily schedule.';
     logInfo('Grid discharge exit applied', { message });
     await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant grid discharge — exit applied', message);
     await storeStatusRecord(buildStatusRecord(deviceSn, nowSeconds, {

@@ -300,8 +300,8 @@ describe('SettingsOptimizerFunction', () => {
             expect(findPutCalls().filter(c => c.input.Item.DeviceSn.includes('SETTINGS#'))).toHaveLength(0);
 
             const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Message).toContain('recommendation only, not applied');
-            expect(publishCall.input.Message).toContain('chargeUpperSocSunny: 40 -> 45');
+            expect(publishCall.input.Message).toContain('recommended, not yet applied');
+            expect(publishCall.input.Message).toContain('Overnight charge target (sunny forecast): 40% -> 45%');
 
             const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
             expect(statusPut.input.Item.applied).toBe(false);

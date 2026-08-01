@@ -52,8 +52,8 @@ describe('AlertFunction', () => {
 
             const message = await checkImportAnomaly(reading, previous, config.tariff);
 
-            expect(message).toContain('Unusually high import');
-            expect(message).toContain('peak-evening');
+            expect(message).toContain('Grid import spiked');
+            expect(message).toContain('peak evening');
             expect(mockSnsSend).toHaveBeenCalledTimes(1);
         });
 
@@ -94,17 +94,18 @@ describe('AlertFunction', () => {
 
             const message = await checkInverterFault(reading, previous);
 
-            expect(message).toContain('recoverable fault');
-            expect(message).toContain('deviceStatus=103');
+            expect(message).toContain('recoverable');
+            expect(message).toContain('Reference code: 103');
             expect(mockSnsSend).toHaveBeenCalledTimes(1);
         });
 
-        test('publishes with PERMANENT severity for a permanent fault (104)', async () => {
+        test('publishes with permanent severity for a permanent fault (104)', async () => {
             const reading = { DeviceSn: 'TEST-SN', deviceStatus: 104 }; // FAULT_PERMANENT
 
             const message = await checkInverterFault(reading, undefined);
 
-            expect(message).toContain('PERMANENT fault');
+            expect(message).toContain('permanent');
+            expect(message).toContain('needs attention');
             expect(mockSnsSend).toHaveBeenCalledTimes(1);
         });
 
@@ -133,7 +134,7 @@ describe('AlertFunction', () => {
 
             const message = await checkInverterFault(reading, undefined);
 
-            expect(message).toContain('recoverable fault');
+            expect(message).toContain('recoverable');
             expect(mockSnsSend).toHaveBeenCalledTimes(1);
         });
     });

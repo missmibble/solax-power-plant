@@ -207,6 +207,16 @@ function buildRecommendations({ currentValues, batterySummary, gridSummary, aiRe
     };
 }
 
+// Plain-English labels for the emailed summary — the recommendations object
+// itself stays keyed by these config field names (other code reads it by
+// key), only the human-facing text needs translating.
+const SETTING_LABELS = {
+    chargeUpperSocSunny: 'Overnight charge target (sunny forecast)',
+    chargeUpperSocOvercast: 'Overnight charge target (overcast forecast)',
+    gridDischargeFallbackReservePercent: 'Grid-export reserve buffer',
+    gridDischargeSafetyMarginPercent: 'Grid-export safety margin'
+};
+
 function formatMessage(recommendations, aiRecommendation, autoApply) {
     const lines = [];
     const changed = Object.entries(recommendations).filter(([, r]) => r.recommended !== null);
@@ -216,8 +226,9 @@ function formatMessage(recommendations, aiRecommendation, autoApply) {
     } else {
         for (const [key, r] of changed) {
             lines.push(
-                `${key}: ${r.current} -> ${r.recommended}${r.clamped ? ' (clamped)' : ''} (${r.sampleSize} sample night${r.sampleSize === 1 ? '' : 's'})`
-                + `${autoApply ? ' — applied' : ' — recommendation only, not applied'}`
+                `${SETTING_LABELS[key] || key}: ${r.current}% -> ${r.recommended}%${r.clamped ? ' (capped)' : ''} ` +
+                `(${r.sampleSize} sample night${r.sampleSize === 1 ? '' : 's'})`
+                + `${autoApply ? ' — applied' : ' — recommended, not yet applied'}`
             );
         }
     }

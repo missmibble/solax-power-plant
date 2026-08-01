@@ -60,9 +60,9 @@ async function checkImportAnomaly(reading, previous, tariff) {
     if (window?.label === NIGHT_CHARGE_WINDOW_LABEL) return null; // expected overnight charging
 
     const message =
-        `Unusually high import: ${deltaImportKwh.toFixed(2)} kWh in one interval` +
-        (window ? ` during ${window.label} (${window.rate}/kWh)` : '') +
-        ` for device ${reading.DeviceSn}.`;
+        `Grid import spiked: ${deltaImportKwh.toFixed(2)} kWh in a single 5-minute interval` +
+        (window ? ` during the ${window.label.replace(/-/g, ' ')} period (normal rate: ${window.rate}/kWh)` : '') +
+        '.';
 
     await publishAlert(message);
     return message;
@@ -78,8 +78,10 @@ async function checkInverterFault(reading, previous) {
     // re-alert every 5 minutes for as long as it persists.
     if (previous && previous.deviceStatus === status) return null;
 
-    const severity = status === DEVICE_STATUS.INVERTER.FAULT_PERMANENT ? 'PERMANENT' : 'recoverable';
-    const message = `Inverter ${severity} fault detected (deviceStatus=${status}) for ${reading.DeviceSn}.`;
+    const isPermanent = status === DEVICE_STATUS.INVERTER.FAULT_PERMANENT;
+    const severity = isPermanent ? 'permanent' : 'recoverable';
+    const guidance = isPermanent ? 'needs attention' : 'typically clears on its own';
+    const message = `Inverter fault detected (${severity}) — ${guidance}. Reference code: ${status}.`;
 
     await publishAlert(message);
     return message;
