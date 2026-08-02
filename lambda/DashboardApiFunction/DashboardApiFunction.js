@@ -30,7 +30,21 @@ const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
 // unlike battery-settings, this dashboard form doesn't own every field in
 // the row and must not clobber ones it doesn't know about.
 const GRID_DISCHARGE_SETTINGS_PREFIX = 'GRID_DISCHARGE_SETTINGS#';
+// Matches SettingsOptimizerFunction.STATUS_RECORD_PREFIX — its weekly
+// recommendation record, read-only here (this Lambda never writes it).
+const SETTINGS_OPTIMIZATION_PREFIX = 'SETTINGS_OPTIMIZATION#';
 const SETTINGS_TIMESTAMP = 0;
+
+// Per-field provenance for a dashboard-editable settings row: 'default' when
+// the row (or that specific field within it) doesn't exist yet and the
+// response fell back to the config/env default; otherwise whatever
+// SOURCE_LABEL the writer tagged it with, defaulting to 'dashboard' for rows
+// written before source-tracking existed (dashboard saves were the only
+// writer for a long time, so that's the correct historical assumption).
+function fieldSource(item, field) {
+    if (!item || item[field] === undefined) return 'default';
+    return item.sources?.[field] || 'dashboard';
+}
 
 // pvYieldKwh/importKwh/exportKwh are deltas of the Inverter device's cumulative
 // totalYield/totalImportEnergy/totalExportEnergy counters. batteryChargeKwh/
@@ -70,6 +84,10 @@ exports.handler = async (event) => {
 
     if (event.resource === '/grid-discharge-settings') {
         return handleGetGridDischargeSettings();
+    }
+
+    if (event.resource === '/settings-optimization') {
+        return handleSettingsOptimization();
     }
 
     return handleReadings(event);
@@ -123,6 +141,37 @@ async function handleInsights() {
         logError('Insights query failed', { error: err.message });
         return response(500, { message: 'Internal server error' });
     }
+}
+
+// SettingsOptimizerFunction's latest weekly recommendation — read-only, same
+// sentinel-DeviceSn pattern as /insights. Lets the dashboard show what the AI
+// last recommended/applied without the reader needing to check CloudWatch
+// Logs or the weekly email.
+async function handleSettingsOptimization() {
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const item = await queryLatestSentinelRecord(`${SETTINGS_OPTIMIZATION_PREFIX}${deviceSn}`);
+        return response(200, formatSettingsOptimizationResponse(item));
+    } catch (err) {
+        logError('Settings optimization query failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+function formatSettingsOptimizationResponse(item) {
+    if (!item) {
+        return { available: false };
+    }
+
+    return {
+        available: true,
+        assessedAt: item.Timestamp,
+        recommendations: item.recommendations || null,
+        confidence: item.confidence || null,
+        reasoning: item.reasoning || null,
+        applied: item.applied,
+        autoApply: item.autoApply
+    };
 }
 
 // Last night's weather classification + chargeUpperSoc decision —
@@ -290,7 +339,8 @@ async function handlePutGridDischargeSettings(event) {
             ...existing.Item,
             ...key,
             enabled: body.enabled,
-            dryRun: body.dryRun
+            dryRun: body.dryRun,
+            sources: { ...existing.Item?.sources, enabled: 'dashboard', dryRun: 'dashboard' }
         };
 
         await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
@@ -312,7 +362,11 @@ function formatGridDischargeSettingsResponse(item) {
     return {
         enabled: item?.enabled ?? (process.env.GRID_DISCHARGE_DEFAULT_ENABLED !== 'false'),
         dryRun: item?.dryRun ?? (process.env.GRID_DISCHARGE_DEFAULT_DRY_RUN !== 'false'),
-        usingDefaults: !item
+        usingDefaults: !item,
+        sources: {
+            enabled: fieldSource(item, 'enabled'),
+            dryRun: fieldSource(item, 'dryRun')
+        }
     };
 }
 
@@ -353,8 +407,19 @@ async function handlePutBatterySettings(event) {
             enabled: body.enabled,
             dryRun: body.dryRun,
             chargeUpperSocSunny: body.chargeUpperSocSunny,
+            chargeUpperSocPartlyCloudy: body.chargeUpperSocPartlyCloudy,
             chargeUpperSocOvercast: body.chargeUpperSocOvercast,
-            disabledChargeUpperSoc: body.disabledChargeUpperSoc
+            disabledChargeUpperSoc: body.disabledChargeUpperSoc,
+            // The dashboard form always submits every field together (a full
+            // replace, not a merge — see the module-level comment on
+            // GRID_DISCHARGE_SETTINGS_PREFIX for how that differs from the grid
+            // discharge form), so every field's source becomes 'dashboard' on
+            // every save, even for a value that happened not to change.
+            sources: {
+                enabled: 'dashboard', dryRun: 'dashboard', chargeUpperSocSunny: 'dashboard',
+                chargeUpperSocPartlyCloudy: 'dashboard', chargeUpperSocOvercast: 'dashboard',
+                disabledChargeUpperSoc: 'dashboard'
+            }
         };
 
         await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
@@ -370,6 +435,7 @@ function validateBatterySettings(body) {
     if (typeof body.enabled !== 'boolean') return 'enabled must be a boolean';
     if (typeof body.dryRun !== 'boolean') return 'dryRun must be a boolean';
     if (!isValidPercent(body.chargeUpperSocSunny)) return 'chargeUpperSocSunny must be a number between 0 and 100';
+    if (!isValidPercent(body.chargeUpperSocPartlyCloudy)) return 'chargeUpperSocPartlyCloudy must be a number between 0 and 100';
     if (!isValidPercent(body.chargeUpperSocOvercast)) return 'chargeUpperSocOvercast must be a number between 0 and 100';
     if (!isValidPercent(body.disabledChargeUpperSoc)) return 'disabledChargeUpperSoc must be a number between 0 and 100';
     return null;
@@ -384,9 +450,18 @@ function formatBatterySettingsResponse(item) {
         enabled: item?.enabled ?? true,
         dryRun: item?.dryRun ?? (process.env.BATTERY_CONTROL_DEFAULT_DRY_RUN !== 'false'),
         chargeUpperSocSunny: item?.chargeUpperSocSunny ?? Number(process.env.BATTERY_CONTROL_DEFAULT_SUNNY),
+        chargeUpperSocPartlyCloudy: item?.chargeUpperSocPartlyCloudy ?? Number(process.env.BATTERY_CONTROL_DEFAULT_PARTLY_CLOUDY),
         chargeUpperSocOvercast: item?.chargeUpperSocOvercast ?? Number(process.env.BATTERY_CONTROL_DEFAULT_OVERCAST),
         disabledChargeUpperSoc: item?.disabledChargeUpperSoc ?? Number(process.env.BATTERY_CONTROL_DEFAULT_DISABLED),
-        usingDefaults: !item
+        usingDefaults: !item,
+        sources: {
+            enabled: fieldSource(item, 'enabled'),
+            dryRun: fieldSource(item, 'dryRun'),
+            chargeUpperSocSunny: fieldSource(item, 'chargeUpperSocSunny'),
+            chargeUpperSocPartlyCloudy: fieldSource(item, 'chargeUpperSocPartlyCloudy'),
+            chargeUpperSocOvercast: fieldSource(item, 'chargeUpperSocOvercast'),
+            disabledChargeUpperSoc: fieldSource(item, 'disabledChargeUpperSoc')
+        }
     };
 }
 
@@ -537,3 +612,4 @@ module.exports.formatBatterySettingsResponse = formatBatterySettingsResponse;
 module.exports.validateBatterySettings = validateBatterySettings;
 module.exports.formatGridDischargeSettingsResponse = formatGridDischargeSettingsResponse;
 module.exports.validateGridDischargeSettings = validateGridDischargeSettings;
+module.exports.formatSettingsOptimizationResponse = formatSettingsOptimizationResponse;

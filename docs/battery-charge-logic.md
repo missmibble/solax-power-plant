@@ -43,7 +43,7 @@ Decision, in order:
 
 ```
 IF no forecast data at all for tomorrow:
-    → overcast (no signal to act on)
+    → overcast (true blind spot, not just an uncertain signal — stays conservative)
 
 ELSE IF hasRainCondition, OR maxPop ≥ 0.4, OR avgClouds ≥ 70%:
     → overcast
@@ -52,12 +52,14 @@ ELSE IF avgClouds ≤ 30% AND maxPop < 0.2:
     → sunny
 
 ELSE:
-    → overcast   (ambiguous / partly-cloudy — safe default)
+    → partly-cloudy   (ambiguous, but not a genuinely bad forecast — a moderate target, not the conservative extreme)
 ```
 
-`sunny` → `chargeUpperSoc = chargeUpperSocSunny` (default 40). `overcast` → `chargeUpperSoc = chargeUpperSocOvercast` (default 100). Both percentages — and a nightly on/off switch — are editable from the dashboard; see "Dashboard-editable settings" below for how that overrides these defaults.
+`sunny` → `chargeUpperSoc = chargeUpperSocSunny` (default 40). `partly-cloudy` → `chargeUpperSoc = chargeUpperSocPartlyCloudy` (default 70). `overcast` → `chargeUpperSoc = chargeUpperSocOvercast` (default 100). All three percentages — and a nightly on/off switch — are editable from the dashboard; see "Dashboard-editable settings" below for how that overrides these defaults.
 
-**The asymmetry is deliberate.** "Sunny" requires *both* thresholds to clearly pass; anything ambiguous, or where the two signals disagree, falls to `overcast`. The cost of guessing "overcast" on an actually-sunny day is a slightly fuller battery than strictly necessary (mild inefficiency). The cost of guessing "sunny" on an actually-overcast day is potentially running the battery flat with no solar to refill it — a materially worse outcome. The thresholds are biased toward the cheaper mistake.
+**Why a third tier.** The ambiguous middle used to fall straight to `overcast` — the reasoning being that a fuller-than-necessary battery is a cheaper mistake than running flat with no solar to refill it (see "The asymmetry" below, which still holds for the *genuinely bad* forecasts). But in practice that meant every forecast that wasn't clearly sunny paid for a full grid charge, even on nights that turned out fine. `assessPreviousDecision`'s own hindsight review flagged exactly this pattern: a night with an ambiguous forecast generated 23.6 kWh of solar the next day and only needed 13.5 kWh of grid import to reach 100% — the target wasn't wrong in outcome (SOC did reach 100%), but a lower overnight grid-charge would have gotten there almost as well, with solar doing more of the work instead of the grid. `partly-cloudy` gives the classifier somewhere to put that middle ground instead of defaulting to the conservative extreme every time.
+
+**The asymmetry is still deliberate for the two extremes.** "Sunny" requires *both* thresholds to clearly pass; a genuinely bad forecast (rain condition, high `maxPop`, heavy `avgClouds`) still goes straight to `overcast`, no middle tier involved — the cost of under-charging before a truly solar-poor day is a materially worse outcome (running flat) than the cost of over-charging, so that bias stays. The new tier only changes what happens to forecasts that are ambiguous *without* tripping any of the bad-weather thresholds.
 
 ## Worked examples
 
@@ -65,13 +67,13 @@ ELSE:
 |---|---|---|---|---|---|---|
 | 1 | Clear all day, no cloud | false | 0.0 | 5% | **sunny** | **40%** |
 | 2 | One slot tagged "Rain" at 2pm, 70% pop | true | 0.7 | 55% | **overcast** | **100%** |
-| 3 | Clouds building in the afternoon, no rain tagged | false | 0.15 | 45% | **overcast** (ambiguous — `avgClouds` > 30%) | **100%** |
-| 4 | Mostly clear, but a 35% pop slot around 3pm, no "Rain" condition | false | 0.35 | 25% | **overcast** (ambiguous — `maxPop` 0.35 is < 0.4 but not < 0.2) | **100%** |
+| 3 | Clouds building in the afternoon, no rain tagged | false | 0.15 | 45% | **partly-cloudy** (ambiguous — `avgClouds` > 30%, but below the 70% overcast threshold) | **70%** |
+| 4 | Mostly clear, but a 35% pop slot around 3pm, no "Rain" condition | false | 0.35 | 25% | **partly-cloudy** (ambiguous — `maxPop` 0.35 is < 0.4 but not < 0.2) | **70%** |
 | 5 | Thick cloud cover all day, but no rain ever forecast | false | 0.1 | 85% | **overcast** (`avgClouds` ≥ 70%) | **100%** |
-| 6 | OpenWeatherMap returns no slots for tomorrow (API hiccup, coverage gap) | — | — | — | **overcast** (no data) | **100%** |
+| 6 | OpenWeatherMap returns no slots for tomorrow (API hiccup, coverage gap) | — | — | — | **overcast** (no data — a true blind spot, not just ambiguous) | **100%** |
 | 7 | A few scattered clouds, clearing by afternoon | false | 0.05 | 20% | **sunny** (both thresholds clearly pass) | **40%** |
 
-Example 4 is the one most worth double-checking against your own judgement — a 35% chance of an isolated afternoon shower with otherwise clear skies is a genuinely borderline case, and this logic currently treats it the same as example 5's thick overcast day. If that feels too conservative once you've watched a few weeks of dry-run output, the fix is a config/threshold tweak, not a rewrite.
+Examples 3 and 4 previously defaulted to `overcast`/100% — they're the exact cases the `partly-cloudy` tier was added for. Example 4 is still the one most worth double-checking against your own judgement — a 35% chance of an isolated afternoon shower with otherwise clear skies is a genuinely borderline case. If 70% still feels too conservative (or not conservative enough) once you've watched a few weeks of dry-run output against example-4-style days, the fix is adjusting `chargeUpperSocPartlyCloudy` from the dashboard, not a threshold rewrite.
 
 ## What actually gets sent (when not a dry run)
 
@@ -85,15 +87,15 @@ Example 4 is the one most worth double-checking against your own judgement — a
 
 ## Dashboard-editable settings
 
-`chargeUpperSocSunny`/`chargeUpperSocOvercast`/`disabledChargeUpperSoc`, a nightly on/off switch, and **dry-run/live mode itself** can all be changed from the dashboard's "Battery Control Settings" panel — no redeploy needed. Saving writes one row to the same readings table, under a fixed sentinel key (`DeviceSn = BATTERY_CONTROL_SETTINGS#<inverterSn>`, `Timestamp = 0` — a single upserted settings row, not time-series). Each run, `BatteryControlFunction.loadSettingsOverride` reads that row and `resolveEffectiveSettings` merges it over `config.batteryControl`'s static defaults — an unset field in the saved override (or no saved override at all yet) falls back to the config value, so this is purely additive to the existing config-driven baseline, never required.
+`chargeUpperSocSunny`/`chargeUpperSocPartlyCloudy`/`chargeUpperSocOvercast`/`disabledChargeUpperSoc`, a nightly on/off switch, and **dry-run/live mode itself** can all be changed from the dashboard's "Battery Control Settings" panel — no redeploy needed. Saving writes one row to the same readings table, under a fixed sentinel key (`DeviceSn = BATTERY_CONTROL_SETTINGS#<inverterSn>`, `Timestamp = 0` — a single upserted settings row, not time-series). Each run, `BatteryControlFunction.loadSettingsOverride` reads that row and `resolveEffectiveSettings` merges it over `config.batteryControl`'s static defaults — an unset field in the saved override (or no saved override at all yet) falls back to the config value, so this is purely additive to the existing config-driven baseline, never required.
 
 **The on/off toggle turns off *forecasting*, not the battery.** When `enabled: false`, the function skips the weather call and `classifyForecast` entirely — no forecast signal drives the decision — but every run still resends the full `config.batteryControl` baseline with `chargeUpperSoc` set to `disabledChargeUpperSoc` (default 100%, dashboard-editable, same as the sunny/overcast targets), through the same dry-run/live path as a normal decision. The status record's `classification` is `'disabled'` in this case. This means disabling automation always converges the battery on a known-safe default (fully charged, by default) rather than leaving it wherever the last automated forecast-driven decision happened to set it — a stale "sunny → 40%" from before you flipped the switch off no longer lingers indefinitely. This is independent of `dryRun`: you can have automation enabled-but-dry-run (the safe validation state described above), or disabled outright regardless of `dryRun`.
 
 **Dry-run/live is now a dashboard toggle, not just a config value.** The dashboard's "Control mode" pill writes `dryRun` into the same override row (`resolveEffectiveSettings` falls back to `config.batteryControl.dryRun` only when the override doesn't specify it) — meaning the safety net that used to require an explicit config edit + `cdk deploy` to disable can now be flipped from a browser session. The UI adds one deliberate speed bump (a confirm dialog before the toggle can be switched to live) but that's a UI-layer nicety, not a security boundary — anyone with dashboard login access can now put the inverter into live mode. Treat the Cognito credentials accordingly, and prefer validating with `dryRun: true` for as long as makes sense (see "How to validate" below) before ever flipping it, from either the dashboard or config.
 
-This was the app's first *write* path from the dashboard (`PUT /battery-settings`), which is exactly what the Cognito login exists to protect — a write action needs real authentication, not just the API key CloudFront injects. `GET /battery-settings` returns the currently-effective values (falling back to `config.batteryControl`'s `chargeUpperSocSunny`/`chargeUpperSocOvercast`/`disabledChargeUpperSoc`/`dryRun` — passed to `DashboardApiFunction` as `BATTERY_CONTROL_DEFAULT_SUNNY`/`_OVERCAST`/`_DISABLED`/`_DRY_RUN` env vars — when nothing's been saved yet) so the settings form always shows something sensible on first load.
+This was the app's first *write* path from the dashboard (`PUT /battery-settings`), which is exactly what the Cognito login exists to protect — a write action needs real authentication, not just the API key CloudFront injects. `GET /battery-settings` returns the currently-effective values (falling back to `config.batteryControl`'s `chargeUpperSocSunny`/`chargeUpperSocPartlyCloudy`/`chargeUpperSocOvercast`/`disabledChargeUpperSoc`/`dryRun` — passed to `DashboardApiFunction` as `BATTERY_CONTROL_DEFAULT_SUNNY`/`_PARTLY_CLOUDY`/`_OVERCAST`/`_DISABLED`/`_DRY_RUN` env vars — when nothing's been saved yet) so the settings form always shows something sensible on first load.
 
-**Caveat worth knowing**: this baseline-override mechanism only ever touches `chargeUpperSocSunny`/`chargeUpperSocOvercast`/`disabledChargeUpperSoc`/`enabled`/`dryRun` — `minSoc`, `chargeFromGridEnable`, and the time windows are still config-only (see "Stale baseline" below); those aren't exposed on the dashboard.
+**Caveat worth knowing**: this baseline-override mechanism only ever touches `chargeUpperSocSunny`/`chargeUpperSocPartlyCloudy`/`chargeUpperSocOvercast`/`disabledChargeUpperSoc`/`enabled`/`dryRun` — `minSoc`, `chargeFromGridEnable`, and the time windows are still config-only (see "Stale baseline" below); those aren't exposed on the dashboard.
 
 ## Previous-decision accuracy assessment
 
@@ -108,7 +110,7 @@ Shown on the dashboard as a small "Last night's accuracy" widget alongside the w
 
 ## Known risks to weigh before enabling live control
 
-- **Stale baseline**: if you change `minSoc`, the time windows, or `chargeFromGridEnable` in the SolaX app directly after this goes live, this function will silently overwrite that change back to whatever's in `config.batteryControl` the next time it runs — because it always resends the full baseline. Any manual change to those settings needs a matching config update + redeploy, or it won't stick. (This does *not* apply to `chargeUpperSocSunny`/`chargeUpperSocOvercast`/`enabled` — those are dashboard-editable, see above.)
+- **Stale baseline**: if you change `minSoc`, the time windows, or `chargeFromGridEnable` in the SolaX app directly after this goes live, this function will silently overwrite that change back to whatever's in `config.batteryControl` the next time it runs — because it always resends the full baseline. Any manual change to those settings needs a matching config update + redeploy, or it won't stick. (This does *not* apply to `chargeUpperSocSunny`/`chargeUpperSocPartlyCloudy`/`chargeUpperSocOvercast`/`enabled` — those are dashboard-editable, see above.)
 - **Endpoint choice unconfirmed**: this targets the plain Inverter endpoint (`batch_set_spontaneity_self_use`) based on your confirmation that there's no EMS1000/EMS1000 PRO device on this system. If that's ever wrong, this endpoint won't be the one actually controlling the inverter's behavior.
 - **Single forecast source, single point**: one lat/lon, one provider, no fallback — a forecast that's simply wrong for that day (weather forecasting is inherently imperfect) will drive a wrong decision with no cross-check.
 - **No verification the change "took"**: there's no read-back endpoint (see above), so a successful API response doesn't strictly prove the inverter's behavior actually changed — only that SolaX Cloud accepted the request.

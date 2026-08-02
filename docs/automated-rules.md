@@ -6,7 +6,7 @@ Every automated decision this app makes, and the exact current setting driving i
 - [docs/grid-discharge-logic.md](grid-discharge-logic.md) — `GridDischargeFunction`
 - [docs/settings-optimizer-logic.md](settings-optimizer-logic.md) — `SettingsOptimizerFunction`
 
-Values below are the real deployed defaults (`config/dev-powerplant.local.json`), noted wherever the public template (`config/dev-powerplant.json`) differs. Dashboard-editable fields (via `/battery-settings` or `/grid-discharge-settings`) are marked **[editable]** — those can currently be at a different, human- or `SettingsOptimizerFunction`-set value without a redeploy; the config value is only the fallback when no override row exists.
+Values below are the real deployed defaults (`config/dev-powerplant.local.json`), noted wherever the public template (`config/dev-powerplant.json`) differs. Dashboard-editable fields (via `/battery-settings` or `/grid-discharge-settings`) are marked **[editable]** — those can currently be at a different, human- or `SettingsOptimizerFunction`-set value without a redeploy; the config value is only the fallback when no override row exists. The Battery Control Settings panel now badges each value with where it actually came from (blank for a human-set value, "default" for an untouched config fallback, "AI recommended" for something `SettingsOptimizerFunction` auto-applied) — see docs/settings-optimizer-logic.md's `sources` mechanics — and a "Last AI recommendation" widget (`GET /settings-optimization`) shows the AI's latest full weekly verdict regardless of whether `autoApply` is on.
 
 ## Tariff (`config.tariff`, `config.location.timezone`)
 
@@ -47,8 +47,9 @@ When SOC data is available for the peak window, further distinguishes "already d
 
 | Rule | Value |
 |---|---|
-| Forecast classification | Tomorrow's OpenWeatherMap slots → `sunny` or `overcast` |
+| Forecast classification | Tomorrow's OpenWeatherMap slots → `sunny`, `partly-cloudy`, or `overcast` |
 | Charge target if sunny **[editable]** | `chargeUpperSocSunny` = **40%** |
+| Charge target if partly cloudy **[editable]** | `chargeUpperSocPartlyCloudy` = **70%** — the ambiguous-forecast middle ground, added so an uncertain-but-not-bad forecast doesn't default to a full grid charge it usually doesn't need |
 | Charge target if overcast **[editable]** | `chargeUpperSocOvercast` = **100%** |
 | Charge target if disabled **[editable]** | `disabledChargeUpperSoc` = **100%** |
 | Minimum SOC floor | `minSoc` = **10%** (not dashboard-editable) |
@@ -78,7 +79,7 @@ When SOC data is available for the peak window, further distinguishes "already d
 
 ## SettingsOptimizerFunction — self-tuning bounds
 
-Reviews the four **[editable]** values above (`chargeUpperSocSunny`, `chargeUpperSocOvercast`, `gridDischarge.fallbackReservePercent`, `gridDischarge.safetyMarginPercent`) weekly and proposes changes, gated by two rules enforced in code regardless of what the AI recommends:
+Reviews the five **[editable]** values above (`chargeUpperSocSunny`, `chargeUpperSocPartlyCloudy`, `chargeUpperSocOvercast`, `gridDischarge.fallbackReservePercent`, `gridDischarge.safetyMarginPercent`) weekly and proposes changes, gated by two rules enforced in code regardless of what the AI recommends:
 
 | Rule | Value |
 |---|---|

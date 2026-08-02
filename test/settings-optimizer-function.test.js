@@ -39,7 +39,7 @@ const BASE_CONFIG = {
     lookbackDays: 7,
     minSampleSize: 3,
     maxAdjustmentPercent: 15,
-    batteryControlDefaults: { chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100 },
+    batteryControlDefaults: { chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100 },
     gridDischargeDefaults: { fallbackReservePercent: 26, safetyMarginPercent: 10 }
 };
 
@@ -50,6 +50,7 @@ function bedrockTextResponse(text) {
 function validAiResponseText(overrides = {}) {
     return JSON.stringify({
         chargeUpperSocSunny: null,
+        chargeUpperSocPartlyCloudy: null,
         chargeUpperSocOvercast: null,
         gridDischargeFallbackReservePercent: null,
         gridDischargeSafetyMarginPercent: null,
@@ -109,6 +110,17 @@ describe('SettingsOptimizerFunction', () => {
             expect(summary.overcast.accurate).toBe(1);
         });
 
+        test('groups partly-cloudy records too, not just sunny/overcast', () => {
+            const summary = summarizeBatteryControlHistory([
+                { classification: 'partly-cloudy', previousAssessment: { accurate: false, usageShouldInfluence: false } },
+                { classification: 'partly-cloudy', previousAssessment: { accurate: true, usageShouldInfluence: false } }
+            ]);
+
+            expect(summary['partly-cloudy'].nights).toBe(2);
+            expect(summary['partly-cloudy'].accurate).toBe(1);
+            expect(summary['partly-cloudy'].inaccurate).toBe(1);
+        });
+
         test('ignores disabled-classification records', () => {
             const summary = summarizeBatteryControlHistory([{ classification: 'disabled' }]);
             expect(summary.disabled).toBeUndefined();
@@ -154,22 +166,49 @@ describe('SettingsOptimizerFunction', () => {
 
     describe('buildRecommendations', () => {
         const currentValues = {
-            chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100,
+            chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100,
             gridDischargeFallbackReservePercent: 26, gridDischargeSafetyMarginPercent: 10
         };
-        const batterySummary = { sunny: { nights: 5 }, overcast: { nights: 1 } };
+        const batterySummary = { sunny: { nights: 5 }, 'partly-cloudy': { nights: 4 }, overcast: { nights: 1 } };
         const gridSummary = { shoulderNightReserves: [10, 12, 15, 9] }; // 4 sample nights
 
         test('holds the current value when the AI recommends null', () => {
             const aiRecommendation = {
-                chargeUpperSocSunny: null, chargeUpperSocOvercast: null,
+                chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: null,
                 gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
             };
             const result = buildRecommendations({
                 currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocSunny.recommended).toBeNull();
+            expect(result.chargeUpperSocPartlyCloudy.recommended).toBeNull();
             expect(result.gridDischargeFallbackReservePercent.recommended).toBeNull();
+        });
+
+        test('applies a chargeUpperSocPartlyCloudy recommendation, sample-sized from the partly-cloudy classification count', () => {
+            const aiRecommendation = {
+                chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: 65, chargeUpperSocOvercast: null,
+                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
+            };
+            const result = buildRecommendations({
+                currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
+            });
+            expect(result.chargeUpperSocPartlyCloudy.recommended).toBe(65);
+            expect(result.chargeUpperSocPartlyCloudy.sampleSize).toBe(4);
+        });
+
+        test('holds chargeUpperSocPartlyCloudy when its sample size is below minSampleSize', () => {
+            const thinBatterySummary = { ...batterySummary, 'partly-cloudy': { nights: 2 } };
+            const aiRecommendation = {
+                chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: 65, chargeUpperSocOvercast: null,
+                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
+            };
+            const result = buildRecommendations({
+                currentValues, batterySummary: thinBatterySummary, gridSummary, aiRecommendation,
+                minSampleSize: 3, maxAdjustmentPercent: 15
+            });
+            expect(result.chargeUpperSocPartlyCloudy.recommended).toBeNull();
+            expect(result.chargeUpperSocPartlyCloudy.reason).toBe('insufficient sample size');
         });
 
         test('holds the current value when sample size is below minSampleSize, even with an AI recommendation', () => {
@@ -339,9 +378,75 @@ describe('SettingsOptimizerFunction', () => {
             expect(batteryPut.input.Item.chargeUpperSocSunny).toBe(45);
             expect(batteryPut.input.Item.enabled).toBe(false); // preserved from the existing override
             expect(batteryPut.input.Item.chargeUpperSocOvercast).toBe(100); // preserved
+            expect(batteryPut.input.Item.sources.chargeUpperSocSunny).toBe('settings-optimizer');
 
             const publishCall = mockSnsSend.mock.calls[0][0];
             expect(publishCall.input.Subject).toContain('applied');
+        });
+
+        test('autoApply run: preserves an existing sources entry for a field it did not touch this run', async () => {
+            process.env.SETTINGS_OPTIMIZER_CONFIG = JSON.stringify({ ...BASE_CONFIG, autoApply: true });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(validAiResponseText({
+                chargeUpperSocSunny: 45, confidence: 'high', reasoning: 'Consistently ran flat on sunny nights.'
+            })));
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get' && command.input.Key.DeviceSn === `${BATTERY_SETTINGS_PREFIX}H34ABCDEFG5001`) {
+                    // chargeUpperSocOvercast was previously human-set via the dashboard —
+                    // this run only recommends a change to chargeUpperSocSunny.
+                    return Promise.resolve({
+                        Item: { enabled: true, chargeUpperSocOvercast: 100, sources: { chargeUpperSocOvercast: 'dashboard' } }
+                    });
+                }
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type !== 'Query') return Promise.resolve({});
+                if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                    return Promise.resolve({
+                        Items: [
+                            { classification: 'sunny', previousAssessment: { accurate: false } },
+                            { classification: 'sunny', previousAssessment: { accurate: false } },
+                            { classification: 'sunny', previousAssessment: { accurate: false } }
+                        ]
+                    });
+                }
+                return Promise.resolve({ Items: [] });
+            });
+            ({ handler } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
+
+            await handler();
+
+            const batteryPut = findPutCalls().find(c => c.input.Item.DeviceSn === `${BATTERY_SETTINGS_PREFIX}H34ABCDEFG5001`);
+            expect(batteryPut.input.Item.sources.chargeUpperSocSunny).toBe('settings-optimizer');
+            expect(batteryPut.input.Item.sources.chargeUpperSocOvercast).toBe('dashboard'); // untouched this run, preserved
+        });
+
+        test('autoApply run: also writes a recommended chargeUpperSocPartlyCloudy value, sample-sized from partly-cloudy nights', async () => {
+            process.env.SETTINGS_OPTIMIZER_CONFIG = JSON.stringify({ ...BASE_CONFIG, autoApply: true });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(validAiResponseText({
+                chargeUpperSocPartlyCloudy: 60, confidence: 'high', reasoning: 'Partly-cloudy nights consistently needed less than the full target.'
+            })));
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type !== 'Query') return Promise.resolve({});
+                if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                    return Promise.resolve({
+                        Items: [
+                            { classification: 'partly-cloudy', previousAssessment: { accurate: false } },
+                            { classification: 'partly-cloudy', previousAssessment: { accurate: false } },
+                            { classification: 'partly-cloudy', previousAssessment: { accurate: true } }
+                        ]
+                    });
+                }
+                return Promise.resolve({ Items: [] });
+            });
+            ({ handler } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            const batteryPut = findPutCalls().find(c => c.input.Item.DeviceSn === `${BATTERY_SETTINGS_PREFIX}H34ABCDEFG5001`);
+            expect(batteryPut).toBeDefined();
+            expect(batteryPut.input.Item.chargeUpperSocPartlyCloudy).toBe(60);
+            expect(batteryPut.input.Item.sources.chargeUpperSocPartlyCloudy).toBe('settings-optimizer');
         });
 
         test('failure: a Bedrock error publishes to the alerts topic and rethrows', async () => {

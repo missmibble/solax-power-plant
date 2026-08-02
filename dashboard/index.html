@@ -103,6 +103,12 @@
       <span class="widget-value" id="previousAssessmentAccurate">–</span>
       <span class="widget-sub" id="previousAssessmentText">–</span>
     </div>
+    <div class="widget" id="settingsOptimizationWidget" hidden>
+      <span class="widget-label">Last AI recommendation</span>
+      <span class="widget-value" id="settingsOptimizationSummary">–</span>
+      <span class="widget-sub" id="settingsOptimizationMeta">–</span>
+      <span class="widget-sub" id="settingsOptimizationReasoning">–</span>
+    </div>
   </section>
   <p id="batteryStatusStatus" class="status" hidden></p>
 
@@ -150,15 +156,14 @@
                   <input type="checkbox" id="batteryControlEnabled">
                   <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
                 </label>
+                <span class="source-badge" id="batteryControlEnabledSource"></span>
               </td>
             </tr>
             <tr>
               <th scope="row"><label for="batteryControlLive">Control mode</label></th>
               <td>
-                Dry run only logs and emails what tonight's charge decision would do, without ever calling
-                the inverter. Live allows it to actually apply that decision. Independent of the enabled
-                toggle above — a disabled-but-live run still applies the "Default charge when disabled"
-                target for real.
+                Dry run only logs and emails the decision. When enabled, 'Live' sends updates to the inverter.
+                If nightly charge control is off, the "Default charge when disabled" value below is used.
               </td>
               <td class="value-cell">
                 <label class="toggle-pill toggle-pill--danger">
@@ -166,6 +171,7 @@
                   <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
                 </label>
                 <span class="toggle-pill-state" id="batteryControlLiveState">Dry run</span>
+                <span class="source-badge" id="batteryControlLiveSource"></span>
               </td>
             </tr>
             <tr>
@@ -176,16 +182,31 @@
               </td>
               <td class="value-cell">
                 <input type="number" id="chargeUpperSocSunny" min="0" max="100" required><span class="unit">%</span>
+                <span class="source-badge" id="chargeUpperSocSunnySource"></span>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><label for="chargeUpperSocPartlyCloudy">Partly cloudy / uncertain forecast charge target</label></th>
+              <td>
+                How full to charge the battery overnight when tomorrow's forecast is ambiguous — not clearly
+                sunny, but no rain or heavy cloud either. Sits between the sunny and overcast targets rather
+                than defaulting straight to the overcast one, so an uncertain-but-not-bad forecast doesn't
+                pay for a full grid charge it usually doesn't need.
+              </td>
+              <td class="value-cell">
+                <input type="number" id="chargeUpperSocPartlyCloudy" min="0" max="100" required><span class="unit">%</span>
+                <span class="source-badge" id="chargeUpperSocPartlyCloudySource"></span>
               </td>
             </tr>
             <tr>
               <th scope="row"><label for="chargeUpperSocOvercast">Overcast/rainy forecast charge target</label></th>
               <td>
-                How full to charge the battery overnight when tomorrow is forecast overcast, rainy, or
-                uncertain. Usually kept high, since there's little solar to top it back up during the day.
+                How full to charge the battery overnight when tomorrow is forecast overcast or rainy.
+                Usually kept high, since there's little solar to top it back up during the day.
               </td>
               <td class="value-cell">
                 <input type="number" id="chargeUpperSocOvercast" min="0" max="100" required><span class="unit">%</span>
+                <span class="source-badge" id="chargeUpperSocOvercastSource"></span>
               </td>
             </tr>
             <tr>
@@ -198,13 +219,14 @@
               </td>
               <td class="value-cell">
                 <input type="number" id="disabledChargeUpperSoc" min="0" max="100" required><span class="unit">%</span>
+                <span class="source-badge" id="disabledChargeUpperSocSource"></span>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <button type="submit">Save settings</button>
+      <button type="submit" id="batterySettingsSaveButton" class="settings-save-button">Save settings</button>
       <p id="batterySettingsStatus" class="status" hidden></p>
     </form>
   </section>
@@ -253,7 +275,7 @@
         </table>
       </div>
 
-      <button type="submit">Save settings</button>
+      <button type="submit" id="gridDischargeSettingsSaveButton" class="settings-save-button">Save settings</button>
       <p id="gridDischargeSettingsStatus" class="status" hidden></p>
     </form>
 

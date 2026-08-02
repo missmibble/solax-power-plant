@@ -9,7 +9,8 @@ const {
     formatBatterySettingsResponse,
     validateBatterySettings,
     formatGridDischargeSettingsResponse,
-    validateGridDischargeSettings
+    validateGridDischargeSettings,
+    formatSettingsOptimizationResponse
 } = require('../lambda/DashboardApiFunction/DashboardApiFunction');
 
 const config = JSON.parse(
@@ -279,6 +280,7 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
         process.env = {
             ...originalEnv,
             BATTERY_CONTROL_DEFAULT_SUNNY: '40',
+            BATTERY_CONTROL_DEFAULT_PARTLY_CLOUDY: '70',
             BATTERY_CONTROL_DEFAULT_OVERCAST: '100',
             BATTERY_CONTROL_DEFAULT_DISABLED: '100',
             BATTERY_CONTROL_DEFAULT_DRY_RUN: 'true'
@@ -289,28 +291,56 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
         process.env = originalEnv;
     });
 
+    const ALL_DEFAULT_SOURCES = {
+        enabled: 'default', dryRun: 'default', chargeUpperSocSunny: 'default',
+        chargeUpperSocPartlyCloudy: 'default', chargeUpperSocOvercast: 'default', disabledChargeUpperSoc: 'default'
+    };
+
     test('falls back to the config defaults when no override has been saved', () => {
         expect(formatBatterySettingsResponse(undefined)).toEqual({
             enabled: true,
             dryRun: true,
             chargeUpperSocSunny: 40,
+            chargeUpperSocPartlyCloudy: 70,
             chargeUpperSocOvercast: 100,
             disabledChargeUpperSoc: 100,
-            usingDefaults: true
+            usingDefaults: true,
+            sources: ALL_DEFAULT_SOURCES
         });
     });
 
-    test('uses the saved override values when present', () => {
+    test('uses the saved override values when present, with every field sourced from the saved sources map', () => {
         const item = {
-            enabled: false, dryRun: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+            enabled: false, dryRun: false, chargeUpperSocSunny: 25, chargeUpperSocPartlyCloudy: 60,
+            chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80,
+            sources: {
+                enabled: 'dashboard', dryRun: 'dashboard', chargeUpperSocSunny: 'settings-optimizer',
+                chargeUpperSocPartlyCloudy: 'dashboard', chargeUpperSocOvercast: 'dashboard', disabledChargeUpperSoc: 'dashboard'
+            }
         };
         expect(formatBatterySettingsResponse(item)).toEqual({
             enabled: false,
             dryRun: false,
             chargeUpperSocSunny: 25,
+            chargeUpperSocPartlyCloudy: 60,
             chargeUpperSocOvercast: 90,
             disabledChargeUpperSoc: 80,
-            usingDefaults: false
+            usingDefaults: false,
+            sources: {
+                enabled: 'dashboard', dryRun: 'dashboard', chargeUpperSocSunny: 'settings-optimizer',
+                chargeUpperSocPartlyCloudy: 'dashboard', chargeUpperSocOvercast: 'dashboard', disabledChargeUpperSoc: 'dashboard'
+            }
+        });
+    });
+
+    test('a row saved before source-tracking existed (no sources map) defaults every present field to "dashboard"', () => {
+        const item = {
+            enabled: true, dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70,
+            chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+        };
+        expect(formatBatterySettingsResponse(item).sources).toEqual({
+            enabled: 'dashboard', dryRun: 'dashboard', chargeUpperSocSunny: 'dashboard',
+            chargeUpperSocPartlyCloudy: 'dashboard', chargeUpperSocOvercast: 'dashboard', disabledChargeUpperSoc: 'dashboard'
         });
     });
 
@@ -323,20 +353,30 @@ describe('DashboardApiFunction formatBatterySettingsResponse', () => {
 describe('DashboardApiFunction validateBatterySettings', () => {
     test('accepts a valid payload', () => {
         expect(validateBatterySettings({
-            enabled: true, dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            enabled: true, dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70,
+            chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
         })).toBeNull();
     });
 
     test('rejects a non-boolean enabled field', () => {
         expect(validateBatterySettings({
-            enabled: 'yes', dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            enabled: 'yes', dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70,
+            chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
         })).toMatch(/enabled/);
     });
 
     test('rejects a non-boolean dryRun field', () => {
         expect(validateBatterySettings({
-            enabled: true, dryRun: 'no', chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+            enabled: true, dryRun: 'no', chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70,
+            chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
         })).toMatch(/dryRun/);
+    });
+
+    test('rejects a non-numeric chargeUpperSocPartlyCloudy field', () => {
+        expect(validateBatterySettings({
+            enabled: true, dryRun: true, chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 101,
+            chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+        })).toMatch(/chargeUpperSocPartlyCloudy/);
     });
 
     test.each([
@@ -344,13 +384,15 @@ describe('DashboardApiFunction validateBatterySettings', () => {
         [undefined, 100, 100], [40, 100, -1], [40, 100, 101], [40, 100, undefined]
     ])('rejects out-of-range or non-numeric percentages (%p, %p, %p)', (sunny, overcast, disabled) => {
         expect(validateBatterySettings({
-            enabled: true, dryRun: true, chargeUpperSocSunny: sunny, chargeUpperSocOvercast: overcast, disabledChargeUpperSoc: disabled
+            enabled: true, dryRun: true, chargeUpperSocSunny: sunny, chargeUpperSocPartlyCloudy: 70,
+            chargeUpperSocOvercast: overcast, disabledChargeUpperSoc: disabled
         })).toEqual(expect.any(String));
     });
 
     test('accepts boundary values 0 and 100', () => {
         expect(validateBatterySettings({
-            enabled: true, dryRun: true, chargeUpperSocSunny: 0, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 0
+            enabled: true, dryRun: true, chargeUpperSocSunny: 0, chargeUpperSocPartlyCloudy: 50,
+            chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 0
         })).toBeNull();
     });
 });
@@ -374,15 +416,19 @@ describe('DashboardApiFunction formatGridDischargeSettingsResponse', () => {
         expect(formatGridDischargeSettingsResponse(undefined)).toEqual({
             enabled: true,
             dryRun: true,
-            usingDefaults: true
+            usingDefaults: true,
+            sources: { enabled: 'default', dryRun: 'default' }
         });
     });
 
     test('uses the saved override values when present', () => {
-        expect(formatGridDischargeSettingsResponse({ enabled: false, dryRun: false })).toEqual({
+        expect(formatGridDischargeSettingsResponse({
+            enabled: false, dryRun: false, sources: { enabled: 'dashboard', dryRun: 'dashboard' }
+        })).toEqual({
             enabled: false,
             dryRun: false,
-            usingDefaults: false
+            usingDefaults: false,
+            sources: { enabled: 'dashboard', dryRun: 'dashboard' }
         });
     });
 
@@ -390,7 +436,8 @@ describe('DashboardApiFunction formatGridDischargeSettingsResponse', () => {
         expect(formatGridDischargeSettingsResponse({ fallbackReservePercent: 30, safetyMarginPercent: 15 })).toEqual({
             enabled: true,
             dryRun: true,
-            usingDefaults: false
+            usingDefaults: false,
+            sources: { enabled: 'default', dryRun: 'default' }
         });
     });
 
@@ -400,7 +447,8 @@ describe('DashboardApiFunction formatGridDischargeSettingsResponse', () => {
         expect(formatGridDischargeSettingsResponse(undefined)).toEqual({
             enabled: false,
             dryRun: false,
-            usingDefaults: true
+            usingDefaults: true,
+            sources: { enabled: 'default', dryRun: 'default' }
         });
     });
 });
@@ -416,5 +464,39 @@ describe('DashboardApiFunction validateGridDischargeSettings', () => {
 
     test('rejects a non-boolean dryRun field', () => {
         expect(validateGridDischargeSettings({ enabled: true, dryRun: 'no' })).toMatch(/dryRun/);
+    });
+});
+
+describe('DashboardApiFunction formatSettingsOptimizationResponse', () => {
+    test('returns available: false when no record exists yet', () => {
+        expect(formatSettingsOptimizationResponse(null)).toEqual({ available: false });
+    });
+
+    test('surfaces the stored record when one exists', () => {
+        const item = {
+            Timestamp: 1785400000,
+            recommendations: { chargeUpperSocSunny: { current: 40, recommended: 45, sampleSize: 3 } },
+            confidence: 'medium',
+            reasoning: 'Sunny nights ran flat twice.',
+            applied: false,
+            autoApply: false
+        };
+        expect(formatSettingsOptimizationResponse(item)).toEqual({
+            available: true,
+            assessedAt: 1785400000,
+            recommendations: item.recommendations,
+            confidence: 'medium',
+            reasoning: 'Sunny nights ran flat twice.',
+            applied: false,
+            autoApply: false
+        });
+    });
+
+    test('defaults recommendations/confidence/reasoning to null when missing from the record', () => {
+        const item = { Timestamp: 1785400000, applied: false, autoApply: false };
+        const result = formatSettingsOptimizationResponse(item);
+        expect(result.recommendations).toBeNull();
+        expect(result.confidence).toBeNull();
+        expect(result.reasoning).toBeNull();
     });
 });

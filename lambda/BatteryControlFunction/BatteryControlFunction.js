@@ -97,10 +97,20 @@ async function fetchTomorrowForecastSlots(lat, lon, apiKey, timezone) {
     return (payload.list || []).filter(slot => localDateString(slot.dt, timezone) === tomorrow);
 }
 
-// Classifies tomorrow's forecast slots into a charge target. Ambiguous signal
-// (partly cloudy, borderline rain chance) deliberately falls back to "overcast"
-// — the safe failure mode here is a fuller-than-necessary battery, not one that
-// runs out before solar catches up.
+// Classifies tomorrow's forecast slots into a charge target. Three tiers:
+// clearly good (sunny), clearly bad (overcast — rain condition, high rain
+// chance, or heavy cloud), and everything in between (partly-cloudy). The
+// ambiguous middle used to fall back to "overcast" outright — the safe
+// failure mode being a fuller-than-necessary battery — but that meant every
+// forecast that wasn't clearly sunny paid for a full grid charge even on
+// nights that turned out fine (see docs/battery-charge-logic.md's
+// "Previous-decision accuracy assessment" for a worked example of exactly
+// this: a night classified this way needed far less grid import than a
+// 100% target assumed, because next-day solar covered most of it anyway).
+// partly-cloudy's target sits between the other two rather than defaulting
+// to the conservative extreme. No forecast data at all still defaults to
+// overcast — that's a true blind spot, not just an uncertain-but-present
+// signal, so the safe-failure-mode reasoning still applies there.
 function classifyForecast(slots) {
     if (!slots.length) {
         return { classification: 'overcast', reasoning: 'No forecast data for tomorrow — defaulting to safe/conservative.' };
@@ -125,8 +135,8 @@ function classifyForecast(slots) {
     }
 
     return {
-        classification: 'overcast',
-        reasoning: `Ambiguous forecast (maxPop=${maxPop.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%) — defaulting to safe/conservative.`
+        classification: 'partly-cloudy',
+        reasoning: `Ambiguous forecast (maxPop=${maxPop.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%) — moderate charge target rather than defaulting to full.`
     };
 }
 
@@ -223,9 +233,20 @@ function resolveEffectiveSettings(batteryControlConfig, override) {
         enabled: override?.enabled ?? true,
         dryRun: override?.dryRun ?? (batteryControlConfig.dryRun !== false),
         chargeUpperSocSunny: override?.chargeUpperSocSunny ?? batteryControlConfig.chargeUpperSocSunny,
+        chargeUpperSocPartlyCloudy: override?.chargeUpperSocPartlyCloudy ?? batteryControlConfig.chargeUpperSocPartlyCloudy,
         chargeUpperSocOvercast: override?.chargeUpperSocOvercast ?? batteryControlConfig.chargeUpperSocOvercast,
         disabledChargeUpperSoc: override?.disabledChargeUpperSoc ?? batteryControlConfig.disabledChargeUpperSoc
     };
+}
+
+// classification -> which effective.* charge target applies. 'overcast' is
+// also the fallback for any unrecognized classification (there isn't one
+// today, but a bad classification should still converge on the safe extreme,
+// not silently produce chargeUpperSoc: undefined).
+function chargeTargetForClassification(classification, effective) {
+    if (classification === 'sunny') return effective.chargeUpperSocSunny;
+    if (classification === 'partly-cloudy') return effective.chargeUpperSocPartlyCloudy;
+    return effective.chargeUpperSocOvercast;
 }
 
 // Reads the last stored decision (before this run's) plus the readings since
@@ -385,7 +406,7 @@ exports.handler = async () => {
                 process.env.WEATHER_LAT, process.env.WEATHER_LON, weatherApiKey, tariff.timezone
             );
             ({ classification, reasoning } = classifyForecast(slots));
-            chargeUpperSoc = classification === 'sunny' ? effective.chargeUpperSocSunny : effective.chargeUpperSocOvercast;
+            chargeUpperSoc = chargeTargetForClassification(classification, effective);
         }
 
         const requestBody = buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc);
@@ -445,6 +466,7 @@ module.exports.classifyForecast = classifyForecast;
 module.exports.buildSelfUseModeRequest = buildSelfUseModeRequest;
 module.exports.buildBatteryStatusRecord = buildBatteryStatusRecord;
 module.exports.resolveEffectiveSettings = resolveEffectiveSettings;
+module.exports.chargeTargetForClassification = chargeTargetForClassification;
 module.exports.summarizeUsage = summarizeUsage;
 module.exports.parseAccuracyAssessment = parseAccuracyAssessment;
 module.exports.BATTERY_STATUS_RECORD_PREFIX = BATTERY_STATUS_RECORD_PREFIX;

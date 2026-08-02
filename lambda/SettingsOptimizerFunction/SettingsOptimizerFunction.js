@@ -26,10 +26,11 @@ const SETTINGS_TIMESTAMP = 0;
 const STATUS_RECORD_PREFIX = 'SETTINGS_OPTIMIZATION#';
 
 const SYSTEM_PROMPT = `You are reviewing a week of operational history for a home solar + battery system, \
-to recommend whether four control-tuning defaults should be adjusted:
+to recommend whether five control-tuning defaults should be adjusted:
 
-1. chargeUpperSocSunny / chargeUpperSocOvercast — how full the battery charges overnight based on \
-tomorrow's weather forecast (a lower sunny target relies on solar catching up during the day).
+1. chargeUpperSocSunny / chargeUpperSocPartlyCloudy / chargeUpperSocOvercast — how full the battery charges \
+overnight based on tomorrow's weather forecast (a lower sunny target relies on solar catching up during the \
+day; partly-cloudy is the ambiguous-forecast middle ground between sunny and overcast).
 2. gridDischargeFallbackReservePercent / gridDischargeSafetyMarginPercent — how much charge is held back \
 during a 5-9pm premium grid feed-in export window, to guarantee the household's own load is covered from \
 9pm until the next cheap overnight recharge at midnight.
@@ -42,7 +43,7 @@ automated mid-window check detected grid import happening during the discharge w
 was too tight that night).
 
 Respond with ONLY a JSON object of this exact form — no text outside the JSON:
-{"chargeUpperSocSunny": number|null, "chargeUpperSocOvercast": number|null, \
+{"chargeUpperSocSunny": number|null, "chargeUpperSocPartlyCloudy": number|null, "chargeUpperSocOvercast": number|null, \
 "gridDischargeFallbackReservePercent": number|null, "gridDischargeSafetyMarginPercent": number|null, \
 "reasoning": string, "confidence": "low"|"medium"|"high"}
 
@@ -88,7 +89,7 @@ function summarizeBatteryControlHistory(records) {
     const byClassification = {};
 
     for (const r of records) {
-        if (r.classification !== 'sunny' && r.classification !== 'overcast') continue;
+        if (!['sunny', 'partly-cloudy', 'overcast'].includes(r.classification)) continue;
         const bucket = byClassification[r.classification]
             || (byClassification[r.classification] = { nights: 0, accurate: 0, inaccurate: 0, usageNotes: [] });
         bucket.nights += 1;
@@ -135,6 +136,7 @@ function parseOptimizationRecommendation(text) {
     const numOrNull = v => typeof v === 'number' ? v : null;
     return {
         chargeUpperSocSunny: numOrNull(parsed.chargeUpperSocSunny),
+        chargeUpperSocPartlyCloudy: numOrNull(parsed.chargeUpperSocPartlyCloudy),
         chargeUpperSocOvercast: numOrNull(parsed.chargeUpperSocOvercast),
         gridDischargeFallbackReservePercent: numOrNull(parsed.gridDischargeFallbackReservePercent),
         gridDischargeSafetyMarginPercent: numOrNull(parsed.gridDischargeSafetyMarginPercent),
@@ -197,6 +199,9 @@ function buildRecommendations({ currentValues, batterySummary, gridSummary, aiRe
 
     return {
         chargeUpperSocSunny: evaluate('chargeUpperSocSunny', currentValues.chargeUpperSocSunny, batterySummary.sunny?.nights || 0),
+        chargeUpperSocPartlyCloudy: evaluate(
+            'chargeUpperSocPartlyCloudy', currentValues.chargeUpperSocPartlyCloudy, batterySummary['partly-cloudy']?.nights || 0
+        ),
         chargeUpperSocOvercast: evaluate('chargeUpperSocOvercast', currentValues.chargeUpperSocOvercast, batterySummary.overcast?.nights || 0),
         gridDischargeFallbackReservePercent: evaluate(
             'gridDischargeFallbackReservePercent', currentValues.gridDischargeFallbackReservePercent, gridSummary.shoulderNightReserves.length
@@ -212,6 +217,7 @@ function buildRecommendations({ currentValues, batterySummary, gridSummary, aiRe
 // key), only the human-facing text needs translating.
 const SETTING_LABELS = {
     chargeUpperSocSunny: 'Overnight charge target (sunny forecast)',
+    chargeUpperSocPartlyCloudy: 'Overnight charge target (partly cloudy forecast)',
     chargeUpperSocOvercast: 'Overnight charge target (overcast forecast)',
     gridDischargeFallbackReservePercent: 'Grid-export reserve buffer',
     gridDischargeSafetyMarginPercent: 'Grid-export safety margin'
@@ -264,6 +270,20 @@ async function publish(topicArn, subject, message) {
     await snsClient.send(new PublishCommand({ TopicArn: topicArn, Subject: subject, Message: message }));
 }
 
+// 'sources' is a per-field companion map on each settings row (dashboard |
+// settings-optimizer) so the dashboard can show whether a value is the
+// config default, something a human typed in, or something this function
+// auto-applied — without it, every write into these rows looks identical.
+// Only the keys actually being written this run get re-tagged; every other
+// field's existing source is preserved via the spread.
+const SOURCE = 'settings-optimizer';
+
+function mergedSources(existingSources, updatedKeys) {
+    const sources = { ...existingSources };
+    for (const key of updatedKeys) sources[key] = SOURCE;
+    return sources;
+}
+
 // Merges (not replaces) each settings row so a human-set enabled/on-off toggle
 // or a not-recommended-this-week field already saved there isn't clobbered.
 async function applyRecommendations(deviceSn, recommendations, existingBatteryOverride, existingGridOverride) {
@@ -273,6 +293,9 @@ async function applyRecommendations(deviceSn, recommendations, existingBatteryOv
     if (recommendations.chargeUpperSocSunny.recommended !== null) {
         batteryUpdate.chargeUpperSocSunny = recommendations.chargeUpperSocSunny.recommended;
     }
+    if (recommendations.chargeUpperSocPartlyCloudy.recommended !== null) {
+        batteryUpdate.chargeUpperSocPartlyCloudy = recommendations.chargeUpperSocPartlyCloudy.recommended;
+    }
     if (recommendations.chargeUpperSocOvercast.recommended !== null) {
         batteryUpdate.chargeUpperSocOvercast = recommendations.chargeUpperSocOvercast.recommended;
     }
@@ -281,7 +304,8 @@ async function applyRecommendations(deviceSn, recommendations, existingBatteryOv
             TableName: process.env.ENERGY_READINGS_TABLE,
             Item: {
                 DeviceSn: `${BATTERY_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP,
-                ...existingBatteryOverride, ...batteryUpdate
+                ...existingBatteryOverride, ...batteryUpdate,
+                sources: mergedSources(existingBatteryOverride?.sources, Object.keys(batteryUpdate))
             }
         }));
         appliedAny = true;
@@ -299,7 +323,8 @@ async function applyRecommendations(deviceSn, recommendations, existingBatteryOv
             TableName: process.env.ENERGY_READINGS_TABLE,
             Item: {
                 DeviceSn: `${GRID_DISCHARGE_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP,
-                ...existingGridOverride, ...gridUpdate
+                ...existingGridOverride, ...gridUpdate,
+                sources: mergedSources(existingGridOverride?.sources, Object.keys(gridUpdate))
             }
         }));
         appliedAny = true;
@@ -335,6 +360,7 @@ exports.handler = async () => {
 
         const currentValues = {
             chargeUpperSocSunny: batteryOverride?.chargeUpperSocSunny ?? config.batteryControlDefaults.chargeUpperSocSunny,
+            chargeUpperSocPartlyCloudy: batteryOverride?.chargeUpperSocPartlyCloudy ?? config.batteryControlDefaults.chargeUpperSocPartlyCloudy,
             chargeUpperSocOvercast: batteryOverride?.chargeUpperSocOvercast ?? config.batteryControlDefaults.chargeUpperSocOvercast,
             gridDischargeFallbackReservePercent: gridOverride?.fallbackReservePercent ?? config.gridDischargeDefaults.fallbackReservePercent,
             gridDischargeSafetyMarginPercent: gridOverride?.safetyMarginPercent ?? config.gridDischargeDefaults.safetyMarginPercent

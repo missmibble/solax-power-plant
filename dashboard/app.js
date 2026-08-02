@@ -55,14 +55,26 @@ const els = {
   previousAssessmentWidget: document.getElementById('previousAssessmentWidget'),
   previousAssessmentAccurate: document.getElementById('previousAssessmentAccurate'),
   previousAssessmentText: document.getElementById('previousAssessmentText'),
+  settingsOptimizationWidget: document.getElementById('settingsOptimizationWidget'),
+  settingsOptimizationSummary: document.getElementById('settingsOptimizationSummary'),
+  settingsOptimizationMeta: document.getElementById('settingsOptimizationMeta'),
+  settingsOptimizationReasoning: document.getElementById('settingsOptimizationReasoning'),
   batterySettingsForm: document.getElementById('batterySettingsForm'),
   batteryControlEnabled: document.getElementById('batteryControlEnabled'),
+  batteryControlEnabledSource: document.getElementById('batteryControlEnabledSource'),
   batteryControlLive: document.getElementById('batteryControlLive'),
   batteryControlLiveState: document.getElementById('batteryControlLiveState'),
+  batteryControlLiveSource: document.getElementById('batteryControlLiveSource'),
   chargeUpperSocSunny: document.getElementById('chargeUpperSocSunny'),
+  chargeUpperSocSunnySource: document.getElementById('chargeUpperSocSunnySource'),
+  chargeUpperSocPartlyCloudy: document.getElementById('chargeUpperSocPartlyCloudy'),
+  chargeUpperSocPartlyCloudySource: document.getElementById('chargeUpperSocPartlyCloudySource'),
   chargeUpperSocOvercast: document.getElementById('chargeUpperSocOvercast'),
+  chargeUpperSocOvercastSource: document.getElementById('chargeUpperSocOvercastSource'),
   disabledChargeUpperSoc: document.getElementById('disabledChargeUpperSoc'),
+  disabledChargeUpperSocSource: document.getElementById('disabledChargeUpperSocSource'),
   batterySettingsStatus: document.getElementById('batterySettingsStatus'),
+  batterySettingsSaveButton: document.getElementById('batterySettingsSaveButton'),
   runAssessmentButton: document.getElementById('runAssessmentButton'),
   triggerStatus: document.getElementById('triggerStatus'),
   terminateGridDischargeButton: document.getElementById('terminateGridDischargeButton'),
@@ -71,7 +83,8 @@ const els = {
   gridDischargeEnabled: document.getElementById('gridDischargeEnabled'),
   gridDischargeLive: document.getElementById('gridDischargeLive'),
   gridDischargeLiveState: document.getElementById('gridDischargeLiveState'),
-  gridDischargeSettingsStatus: document.getElementById('gridDischargeSettingsStatus')
+  gridDischargeSettingsStatus: document.getElementById('gridDischargeSettingsStatus'),
+  gridDischargeSettingsSaveButton: document.getElementById('gridDischargeSettingsSaveButton')
 };
 
 let chart;
@@ -167,6 +180,7 @@ function showDashboard() {
   loadBatteryStatus();
   loadBatterySettings();
   loadGridDischargeSettings();
+  loadSettingsOptimization();
 }
 
 els.loginForm.addEventListener('submit', async (event) => {
@@ -434,10 +448,10 @@ function renderBatteryStatus(data) {
     els.batteryDecisionMeta.textContent = `As of ${formatTime(data.decidedAt)}`;
     els.batteryDecisionWidget.hidden = false;
   } else {
-    setForecastDecision(
-      data.classification === 'sunny' ? '☀️ Sunny' : '☁️ Overcast/uncertain',
-      data.reasoning
-    );
+    const classificationLabel = data.classification === 'sunny' ? '☀️ Sunny'
+      : data.classification === 'partly-cloudy' ? '⛅ Partly cloudy'
+      : '☁️ Overcast';
+    setForecastDecision(classificationLabel, data.reasoning);
 
     els.batteryChargeTarget.textContent = `${data.chargeUpperSoc}% charge target`;
     els.batteryDecisionMeta.textContent = data.dryRun
@@ -459,6 +473,125 @@ function renderBatteryStatus(data) {
   }
 }
 
+// SettingsOptimizerFunction's latest weekly recommendation — a separate
+// endpoint from battery-status, so a failure here just hides the widget
+// rather than displacing the (more important) weather/charge-decision ones.
+async function loadSettingsOptimization() {
+  try {
+    const res = await authorizedFetch('settings-optimization');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    if (!data.available) {
+      els.settingsOptimizationWidget.hidden = true;
+      return;
+    }
+
+    const recommendations = data.recommendations || {};
+    const changed = Object.values(recommendations).filter(r => r && r.recommended !== null);
+
+    els.settingsOptimizationSummary.textContent = changed.length
+      ? `${changed.length} change${changed.length === 1 ? '' : 's'} recommended`
+      : 'No changes recommended';
+
+    const status = data.applied ? 'Applied' : data.autoApply ? 'Not applied' : 'Recommendation only';
+    els.settingsOptimizationMeta.textContent = data.confidence
+      ? `Confidence: ${data.confidence} · ${status} · ${formatTime(data.assessedAt)}`
+      : `${status} · ${formatTime(data.assessedAt)}`;
+
+    els.settingsOptimizationReasoning.textContent = data.reasoning || '';
+    els.settingsOptimizationWidget.hidden = false;
+  } catch {
+    els.settingsOptimizationWidget.hidden = true;
+  }
+}
+
+// ─── Settings error messages (translate API/validation errors to plain English) ──
+
+// Mirrors the row labels shown on each settings panel, so a validation error
+// names the same thing the user is looking at rather than a raw config field
+// (e.g. "chargeUpperSocPartlyCloudy must be a number between 0 and 100").
+const BATTERY_SETTINGS_FIELD_LABELS = {
+  enabled: 'Nightly charge control enabled',
+  dryRun: 'Control mode',
+  chargeUpperSocSunny: 'Sunny forecast charge target',
+  chargeUpperSocPartlyCloudy: 'Partly cloudy forecast charge target',
+  chargeUpperSocOvercast: 'Overcast/rainy forecast charge target',
+  disabledChargeUpperSoc: 'Default charge when disabled'
+};
+
+const GRID_DISCHARGE_SETTINGS_FIELD_LABELS = {
+  enabled: 'Evening discharge enabled',
+  dryRun: 'Control mode'
+};
+
+// Translates DashboardApiFunction's raw validate*/error messages (field
+// names, HTTP status codes) into something a non-technical reader can act
+// on. Falls back to the original message for anything unrecognized, rather
+// than hiding it — this is a small single-user app, not a public product,
+// so an unmatched technical message surfacing occasionally is preferable to
+// silently swallowing detail that would help track down a real bug.
+function humanizeSettingsError(message, fieldLabels) {
+  if (!message) return 'Something went wrong — please try again.';
+
+  const percentMatch = message.match(/^(\w+) must be a number between 0 and 100$/);
+  if (percentMatch) {
+    const label = fieldLabels[percentMatch[1]] || percentMatch[1];
+    return `"${label}" must be a percentage between 0 and 100.`;
+  }
+
+  const boolMatch = message.match(/^(\w+) must be a boolean$/);
+  if (boolMatch) {
+    const label = fieldLabels[boolMatch[1]] || boolMatch[1];
+    return `There was a problem with the "${label}" toggle — please reload the page and try again.`;
+  }
+
+  if (message === 'Request body must be valid JSON') {
+    return 'Something went wrong preparing your request — please try again.';
+  }
+
+  if (message === 'Internal server error') {
+    return 'Something went wrong saving your settings — please try again in a moment.';
+  }
+
+  if (/^Request failed: \d+$/.test(message)) {
+    return "Couldn't reach the server — please check your connection and try again.";
+  }
+
+  return message;
+}
+
+// Marks a settings form's Save button as soon as any field changes, so a
+// toggle (which only updates on-screen state — it never saves by itself)
+// can never be mistaken for something that's already been persisted. Cleared
+// only on a successful save; a failed save leaves it marked, since the
+// change genuinely is still unsaved. Programmatic population (loadBatterySettings/
+// loadGridDischargeSettings setting .value/.checked from the server response)
+// doesn't fire input events, so this never triggers from a normal page load.
+function setSaveButtonDirty(button, isDirty) {
+  button.textContent = isDirty ? 'Save settings (unsaved changes)' : 'Save settings';
+  button.classList.toggle('unsaved', isDirty);
+}
+
+// Labels a settings field with where its current value actually came from —
+// the config default, a human's dashboard save, or SettingsOptimizerFunction's
+// weekly AI recommendation — so the two can never be visually indistinguishable
+// (a plain number in a text box otherwise looks the same regardless of source).
+// A human-set value ('dashboard') gets no badge at all — it's the implicit
+// baseline state; only the two states worth calling out are marked.
+function renderSourceBadge(el, source) {
+  if (source === 'settings-optimizer') {
+    el.textContent = 'AI recommended';
+    el.className = 'source-badge source-badge--ai';
+  } else if (source === 'default') {
+    el.textContent = 'default';
+    el.className = 'source-badge source-badge--default';
+  } else {
+    el.textContent = '';
+    el.className = 'source-badge';
+  }
+}
+
 // ─── Battery control settings (edit charge % + on/off toggle) ──────────────
 
 async function loadBatterySettings() {
@@ -471,11 +604,18 @@ async function loadBatterySettings() {
     els.batteryControlLive.checked = data.dryRun === false;
     updateLiveStateLabel();
     els.chargeUpperSocSunny.value = data.chargeUpperSocSunny;
+    els.chargeUpperSocPartlyCloudy.value = data.chargeUpperSocPartlyCloudy;
     els.chargeUpperSocOvercast.value = data.chargeUpperSocOvercast;
     els.disabledChargeUpperSoc.value = data.disabledChargeUpperSoc;
+    renderSourceBadge(els.batteryControlEnabledSource, data.sources?.enabled);
+    renderSourceBadge(els.batteryControlLiveSource, data.sources?.dryRun);
+    renderSourceBadge(els.chargeUpperSocSunnySource, data.sources?.chargeUpperSocSunny);
+    renderSourceBadge(els.chargeUpperSocPartlyCloudySource, data.sources?.chargeUpperSocPartlyCloudy);
+    renderSourceBadge(els.chargeUpperSocOvercastSource, data.sources?.chargeUpperSocOvercast);
+    renderSourceBadge(els.disabledChargeUpperSocSource, data.sources?.disabledChargeUpperSoc);
     setBatterySettingsStatus('');
   } catch (err) {
-    setBatterySettingsStatus(`Couldn't load settings: ${err.message}`);
+    setBatterySettingsStatus(`Couldn't load settings: ${humanizeSettingsError(err.message, BATTERY_SETTINGS_FIELD_LABELS)}`);
   }
 }
 
@@ -506,6 +646,14 @@ els.batteryControlLive.addEventListener('change', () => {
   updateLiveStateLabel();
 });
 
+// Any field changing — including the toggle-pills above, which only update
+// on-screen state and never save by themselves — marks the form unsaved
+// immediately, so it's never ambiguous whether what's on screen has actually
+// been persisted yet.
+els.batterySettingsForm.addEventListener('input', () => {
+  setSaveButtonDirty(els.batterySettingsSaveButton, true);
+});
+
 els.batterySettingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setBatterySettingsStatus('Saving…');
@@ -518,6 +666,7 @@ els.batterySettingsForm.addEventListener('submit', async (event) => {
         enabled: els.batteryControlEnabled.checked,
         dryRun: !els.batteryControlLive.checked,
         chargeUpperSocSunny: Number(els.chargeUpperSocSunny.value),
+        chargeUpperSocPartlyCloudy: Number(els.chargeUpperSocPartlyCloudy.value),
         chargeUpperSocOvercast: Number(els.chargeUpperSocOvercast.value),
         disabledChargeUpperSoc: Number(els.disabledChargeUpperSoc.value)
       })
@@ -528,9 +677,18 @@ els.batterySettingsForm.addEventListener('submit', async (event) => {
       throw new Error(body.message || `Request failed: ${res.status}`);
     }
 
+    const saved = await res.json();
+    renderSourceBadge(els.batteryControlEnabledSource, saved.sources?.enabled);
+    renderSourceBadge(els.batteryControlLiveSource, saved.sources?.dryRun);
+    renderSourceBadge(els.chargeUpperSocSunnySource, saved.sources?.chargeUpperSocSunny);
+    renderSourceBadge(els.chargeUpperSocPartlyCloudySource, saved.sources?.chargeUpperSocPartlyCloudy);
+    renderSourceBadge(els.chargeUpperSocOvercastSource, saved.sources?.chargeUpperSocOvercast);
+    renderSourceBadge(els.disabledChargeUpperSocSource, saved.sources?.disabledChargeUpperSoc);
+
+    setSaveButtonDirty(els.batterySettingsSaveButton, false);
     setBatterySettingsStatus('Saved — takes effect on the next nightly run.');
   } catch (err) {
-    setBatterySettingsStatus(`Couldn't save settings: ${err.message}`);
+    setBatterySettingsStatus(`Couldn't save settings: ${humanizeSettingsError(err.message, BATTERY_SETTINGS_FIELD_LABELS)}`);
   }
 });
 
@@ -564,7 +722,7 @@ async function loadGridDischargeSettings() {
     updateGridDischargeLiveStateLabel();
     setGridDischargeSettingsStatus('');
   } catch (err) {
-    setGridDischargeSettingsStatus(`Couldn't load settings: ${err.message}`);
+    setGridDischargeSettingsStatus(`Couldn't load settings: ${humanizeSettingsError(err.message, GRID_DISCHARGE_SETTINGS_FIELD_LABELS)}`);
   }
 }
 
@@ -594,6 +752,12 @@ els.gridDischargeLive.addEventListener('change', () => {
   updateGridDischargeLiveStateLabel();
 });
 
+// Same reasoning as the battery settings form — the toggle-pills here never
+// save by themselves either.
+els.gridDischargeSettingsForm.addEventListener('input', () => {
+  setSaveButtonDirty(els.gridDischargeSettingsSaveButton, true);
+});
+
 els.gridDischargeSettingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   setGridDischargeSettingsStatus('Saving…');
@@ -613,9 +777,10 @@ els.gridDischargeSettingsForm.addEventListener('submit', async (event) => {
       throw new Error(body.message || `Request failed: ${res.status}`);
     }
 
+    setSaveButtonDirty(els.gridDischargeSettingsSaveButton, false);
     setGridDischargeSettingsStatus('Saved — takes effect on the next start/check/exit phase.');
   } catch (err) {
-    setGridDischargeSettingsStatus(`Couldn't save settings: ${err.message}`);
+    setGridDischargeSettingsStatus(`Couldn't save settings: ${humanizeSettingsError(err.message, GRID_DISCHARGE_SETTINGS_FIELD_LABELS)}`);
   }
 });
 

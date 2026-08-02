@@ -106,6 +106,7 @@ describe('LambdaFunctionsStack', () => {
             Environment: {
                 Variables: Match.objectLike({
                     BATTERY_CONTROL_DEFAULT_SUNNY: String(config.batteryControl.chargeUpperSocSunny),
+                    BATTERY_CONTROL_DEFAULT_PARTLY_CLOUDY: String(config.batteryControl.chargeUpperSocPartlyCloudy),
                     BATTERY_CONTROL_DEFAULT_OVERCAST: String(config.batteryControl.chargeUpperSocOvercast),
                     BATTERY_CONTROL_DEFAULT_DISABLED: String(config.batteryControl.disabledChargeUpperSoc),
                     BATTERY_CONTROL_DEFAULT_DRY_RUN: String(config.batteryControl.dryRun !== false)
@@ -427,6 +428,19 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
+    test('creates a /settings-optimization API resource with a GET method requiring Cognito authorization', () => {
+        const resources = template.findResources('AWS::ApiGateway::Resource', {
+            Properties: { PathPart: 'settings-optimization' }
+        });
+        expect(Object.keys(resources)).toHaveLength(1);
+
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'GET',
+            AuthorizationType: 'COGNITO_USER_POOLS',
+            ResourceId: { Ref: Object.keys(resources)[0] }
+        });
+    });
+
     test('DashboardApiFunction gets the GridDischargeFunction name as an env var (manual terminate-early button)', () => {
         template.hasResourceProperties('AWS::Lambda::Function', {
             FunctionName: config.lambda.dashboardApiFunction.functionName,
@@ -452,6 +466,7 @@ describe('LambdaFunctionsStack', () => {
             ...config.settingsOptimizer,
             batteryControlDefaults: {
                 chargeUpperSocSunny: config.batteryControl.chargeUpperSocSunny,
+                chargeUpperSocPartlyCloudy: config.batteryControl.chargeUpperSocPartlyCloudy,
                 chargeUpperSocOvercast: config.batteryControl.chargeUpperSocOvercast
             },
             gridDischargeDefaults: {

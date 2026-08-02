@@ -56,6 +56,7 @@ const BASELINE_CONFIG = {
     minSoc: 10,
     chargeFromGridEnable: 1,
     chargeUpperSocSunny: 40,
+    chargeUpperSocPartlyCloudy: 70,
     chargeUpperSocOvercast: 100,
     disabledChargeUpperSoc: 100,
     chargeStartTimePeriod1: '00:00',
@@ -96,7 +97,7 @@ function bedrockTextResponse(text) {
 
 describe('BatteryControlFunction', () => {
     let classifyForecast, buildSelfUseModeRequest, buildBatteryStatusRecord, resolveEffectiveSettings,
-        summarizeUsage, parseAccuracyAssessment, BATTERY_STATUS_RECORD_PREFIX, handler;
+        chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, BATTERY_STATUS_RECORD_PREFIX, handler;
 
     beforeEach(() => {
         jest.resetModules();
@@ -125,7 +126,7 @@ describe('BatteryControlFunction', () => {
 
         ({
             classifyForecast, buildSelfUseModeRequest, buildBatteryStatusRecord, resolveEffectiveSettings,
-            summarizeUsage, parseAccuracyAssessment, BATTERY_STATUS_RECORD_PREFIX, handler
+            chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, BATTERY_STATUS_RECORD_PREFIX, handler
         } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
     });
 
@@ -154,9 +155,9 @@ describe('BatteryControlFunction', () => {
             expect(classifyForecast(slots).classification).toBe('overcast');
         });
 
-        test('defaults an ambiguous/partly-cloudy forecast to the safe overcast outcome', () => {
+        test('classifies an ambiguous/partly-cloudy forecast as its own tier rather than defaulting to overcast', () => {
             const slots = [tomorrowSlot({ clouds: { all: 50 }, pop: 0.25 })];
-            expect(classifyForecast(slots).classification).toBe('overcast');
+            expect(classifyForecast(slots).classification).toBe('partly-cloudy');
         });
 
         test('defaults to overcast when there is no forecast data at all', () => {
@@ -209,17 +210,18 @@ describe('BatteryControlFunction', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
             expect(effective).toEqual({
                 enabled: true, dryRun: true,
-                chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+                chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
             });
         });
 
         test('uses the override values when present', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, {
-                enabled: false, dryRun: false, chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+                enabled: false, dryRun: false, chargeUpperSocSunny: 25, chargeUpperSocPartlyCloudy: 55,
+                chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
             });
             expect(effective).toEqual({
                 enabled: false, dryRun: false,
-                chargeUpperSocSunny: 25, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
+                chargeUpperSocSunny: 25, chargeUpperSocPartlyCloudy: 55, chargeUpperSocOvercast: 90, disabledChargeUpperSoc: 80
             });
         });
 
@@ -227,7 +229,7 @@ describe('BatteryControlFunction', () => {
             const effective = resolveEffectiveSettings(BASELINE_CONFIG, { enabled: false });
             expect(effective).toEqual({
                 enabled: false, dryRun: true,
-                chargeUpperSocSunny: 40, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
+                chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100, disabledChargeUpperSoc: 100
             });
         });
 
@@ -239,6 +241,28 @@ describe('BatteryControlFunction', () => {
         test('falls back to config.batteryControl.dryRun when the override omits it', () => {
             const effective = resolveEffectiveSettings({ ...BASELINE_CONFIG, dryRun: false }, { enabled: false });
             expect(effective.dryRun).toBe(false);
+        });
+    });
+
+    describe('chargeTargetForClassification', () => {
+        test('sunny -> chargeUpperSocSunny', () => {
+            const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
+            expect(chargeTargetForClassification('sunny', effective)).toBe(40);
+        });
+
+        test('partly-cloudy -> chargeUpperSocPartlyCloudy', () => {
+            const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
+            expect(chargeTargetForClassification('partly-cloudy', effective)).toBe(70);
+        });
+
+        test('overcast -> chargeUpperSocOvercast', () => {
+            const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
+            expect(chargeTargetForClassification('overcast', effective)).toBe(100);
+        });
+
+        test('an unrecognized classification falls back to the overcast (safe) target', () => {
+            const effective = resolveEffectiveSettings(BASELINE_CONFIG, null);
+            expect(chargeTargetForClassification('unknown', effective)).toBe(100);
         });
     });
 
@@ -328,6 +352,22 @@ describe('BatteryControlFunction', () => {
             expect(putCall.input.Item.appliesToDate).toBe(
                 localDateString(Math.floor(Date.now() / 1000) + 24 * 60 * 60, 'UTC')
             );
+        });
+
+        test('uses the partly-cloudy charge target for an ambiguous forecast, rather than defaulting to the overcast one', async () => {
+            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
+            global.fetch.mockResolvedValue({
+                json: async () => ({ cod: '200', list: [tomorrowSlot({ clouds: { all: 50 }, pop: 0.25 })] })
+            });
+
+            await handler();
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Message).toContain("Would set tonight's battery charge target to 70%");
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.classification).toBe('partly-cloudy');
+            expect(putCall.input.Item.chargeUpperSoc).toBe(70);
         });
     });
 
