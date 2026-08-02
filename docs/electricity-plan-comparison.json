@@ -1,0 +1,1229 @@
+{
+  "document_type": "electricity_plan_comparison",
+  "generated": "2026-08-02",
+  "location": {
+    "network": "Energex",
+    "state": "QLD, Australia"
+  },
+  "usage_profile": {
+    "daily_use_kwh_avg": 25.11,
+    "usage_tier": "High use",
+    "meter_type": "Smart meter",
+    "solar_export_kwh_avg_daily": 15.58,
+    "network_tariffs": [
+      "7500",
+      "6900"
+    ]
+  },
+  "currency": "AUD",
+  "plan_count": 47,
+  "known_limitations": [
+    "Energy Made Easy displays 'Showing 25 of 25 plans' for the single rate tab, but only 24 distinct plan cards render/exist in practice - confirmed on repeated checks.",
+    "Flow Home (Flow Power; FP11145354MRE1 single-rate / FP11145355MRE1 TOU) is listed under both Time of Use and Single Rate tabs but charges an identical flat rate at all times in both listings, making it economically a single-rate plan regardless of tab.",
+    "Several plans labelled with block/tiered usage rates have identical rates across all tiers (e.g. ENGIE ENG1111339MRE1, Next Business Energy NEX1119447SRE1, AGL Seniors Saver AGL1055581MRE3), so they function as flat single rates despite the block display.",
+    "GloBird BOOST Residential (GLO1149313MRE1) has a genuine two-tier block rate: 23.21c for the first 25kWh/day, 24.75c thereafter.",
+    "Two single-rate plans have tiered (volume-based) solar feed-in tariffs: Energy Locals Home Choice (LCL1116727MRE1: 3c for 0-5kWh/day, 1c for 5kWh+/day) and 1st Quartz Single Rate (1ST1122751MRE1: 1c first 5kWh/day, 0.1c thereafter).",
+    "Estimated annual costs shown as 'estimated_annual_cost_tailored' are the household-tailored figures from the plan list page (based on the entered usage/solar profile: 25.11 kWh/day, 15.58 kWh/day solar export). The 'estimated_annual_cost_generic_tiers' come from each plan detail page's generic Low/Medium/High reference buckets (9.3/14.7/22.1 kWh/day), which are lower usage than the actual household profile and are provided only as supplementary reference.",
+    "For Tango Energy Solar Sharer Offer (TAN1128308SRE1) a household-tailored cost figure was not able to be preserved from the list page during this session; only the generic High-tier detail-page estimate ($3,110/yr) is available and is flagged as non-tailored in that plan's record."
+  ],
+  "time_of_use_plans": [
+    {
+      "plan_id": "GLO1149341MRE1",
+      "provider": "GloBird Energy",
+      "plan_name": "GLOSAVE Residential (Flexible Energy)-Energex",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 127.6,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 33.66,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 19.36,
+          "times": "9:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 19.36,
+          "times": "9:00pm-8:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 2500,
+        "now": 2380,
+        "discounts": 3
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "OVO723742MRE20",
+      "provider": "OVO Energy",
+      "plan_name": "The EV Plan",
+      "contract": "No lock-in, 1 condition, 2 special offers",
+      "supply_charge_c_per_day": 192.01,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 27.97,
+          "times": "6:00am-11:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 4.5,
+          "times": "12:00am-5:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "100% GreenPower $0.022/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 2450,
+        "discounts": 0
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "RED21554SRE13",
+      "provider": "Red Energy",
+      "plan_name": "Standing Offer",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.01,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 45.1,
+          "times": "4:00pm-7:59pm weekdays"
+        },
+        "off_peak": {
+          "rate_c_kwh": 13.04,
+          "times": "10:00pm-6:59am all week"
+        },
+        "shoulder": {
+          "rate_c_kwh": 26.84,
+          "times": "7am-3:59pm & 8-9:59pm weekdays; 7am-9:59pm weekends"
+        }
+      },
+      "solar_fit_c_kwh": "+5",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2520,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "DOD14354SRE11",
+      "provider": "Dodo",
+      "plan_name": "Residential Standing",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 222.61,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.79,
+          "times": "4:00pm-7:59pm weekdays"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.98,
+          "times": "10:00pm-6:59am"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.3,
+          "times": "7am-3:59pm & 8-9:59pm weekdays; 7am-9:59pm weekends"
+        }
+      },
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2570,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "NTR1143828MRE1",
+      "provider": "Nectr",
+      "plan_name": "Nectr Power Perks Time of Use",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 144.6,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 36.99,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 14.88,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 21.41,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 2860,
+        "now": 2660,
+        "discounts": 2
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "ENE977003MRE8",
+      "provider": "EnergyAustralia",
+      "plan_name": "QLD Seniors Offer - 7 Day TOU",
+      "contract": "Environmental options, 1 Year benefit period, 1 special offer",
+      "supply_charge_c_per_day": 177.85,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.79,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.98,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.3,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+4",
+      "greenpower": "30-100% GreenPower, 30% = $0.0495/kWh",
+      "estimated_annual_cost_tailored": {
+        "was": 3210,
+        "now": 2800,
+        "discounts": 1
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "KOG1060598MRE1",
+      "provider": "Kogan Energy",
+      "plan_name": "Kogan Energy for current FIRST members",
+      "contract": "No lock-in, 1 special offer",
+      "supply_charge_c_per_day": 93.02,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 44.86,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.56,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 23.75,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2900,
+        "discounts": 0
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "PSH1060547MRE1",
+      "provider": "Powershop",
+      "plan_name": "Power House",
+      "contract": "Environmental options, No lock-in",
+      "supply_charge_c_per_day": 93.02,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 44.86,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.56,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 23.75,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "100% GreenPower $0.011/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 2900,
+        "discounts": 0
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "ALI1114254MRE4",
+      "provider": "Alinta Energy",
+      "plan_name": "HomeDeal Smart - Time of Use",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 156.51,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 42.05,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.15,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 22.26,
+          "times": "12:00am-10:59am, 9:00pm-11:59pm"
+        }
+      },
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2910,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "COV1117614MRE2",
+      "provider": "CovaU",
+      "plan_name": "SolarMax QLD Energex Residential TOU",
+      "contract": "Smart meter required, 1 condition",
+      "supply_charge_c_per_day": 152,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 49.55,
+          "times": "3:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 26.91,
+          "times": "6-10:59am, 2-2:59pm, 9-11:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 16.5,
+          "times": "12:00am-5:59am"
+        },
+        "shoulder1": {
+          "block": "11am-1:59pm: first 50kWh/day 0.00c, remaining 26.91c"
+        }
+      },
+      "solar_fit_c_kwh": "tiered: 15c (peak 6-9pm, 0-30kWh/day), 5c (peak 6-9pm, 30kWh+/day), 5c (off-peak 9pm-6pm)",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3000,
+        "discounts": 0
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "SUM1051375MRE2",
+      "provider": "Sumo",
+      "plan_name": "Sumo Sunrise Plus Residential TOU",
+      "contract": "No lock-in, 1 condition, 1 special offer",
+      "supply_charge_c_per_day": 120.78,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 38.34,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 25.08,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.52,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 3110,
+        "now": 3010,
+        "discounts": 1
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "ENG1111343MRE1",
+      "provider": "ENGIE",
+      "plan_name": "QLD_ENGIE Perks Elec",
+      "contract": "1 condition, Ongoing benefit, 1 special offer",
+      "supply_charge_c_per_day": 177.85,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.78,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.97,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.29,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 3380,
+        "now": 3040,
+        "discounts": 1
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "ORI1133168MRE1",
+      "provider": "Origin Energy",
+      "plan_name": "Origin Affinity Variable ePlus Ongoing - One Big Switch",
+      "contract": "No lock-in, 2 conditions",
+      "supply_charge_c_per_day": 168.94,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 45.4,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.63,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 24.04,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+3",
+      "greenpower": "50-100% GreenPower, 50% = $0.0225/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3100,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "AGL1067094MRE1",
+      "provider": "AGL",
+      "plan_name": "Residential Seniors Saver - New To AGL",
+      "contract": "Environmental options, Ongoing benefit, 2 conditions, 1 special offer",
+      "supply_charge_c_per_day": 167.18,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 44.92,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.57,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 23.78,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower $0.011/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3120,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types",
+      "notes": "Flagged by site as current retailer's best offer available; $740 more than the lowest priced plan found at time of collection."
+    },
+    {
+      "plan_id": "FP11145355MRE1",
+      "provider": "Flow Power",
+      "plan_name": "Flow Home",
+      "contract": "Environmental options, No lock-in",
+      "supply_charge_c_per_day": 140.2,
+      "time_of_use_rates": {
+        "flat_all_times": {
+          "rate_c_kwh": 30.19,
+          "note": "Listed as Time of Use but peak/off-peak/shoulder rates are identical - economically a flat single rate."
+        }
+      },
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower included",
+      "estimated_annual_cost_tailored": {
+        "now": 3160,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "MOM1144203MRE2",
+      "provider": "Momentum Energy",
+      "plan_name": "Home Comfort Electricity",
+      "contract": "1 special offer",
+      "supply_charge_c_per_day": 174.24,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 45.87,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.71,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 24.31,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower $0.0352/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3200,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "DIA1122709MRE1",
+      "provider": "Diamond Energy",
+      "plan_name": "Diamond Everyday - Time of Use",
+      "contract": "Environmental options, No lock-in",
+      "supply_charge_c_per_day": 168.69,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.72,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.98,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.12,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+3.1",
+      "greenpower": "50-100% GreenPower, 50% = $0.0275/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3220,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "FEA1136876MRE1",
+      "provider": "Flipped Energy",
+      "plan_name": "Freedom Switched On 2.2!",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 118.6,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 53.46,
+          "times": "4:00pm-7:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 8.54,
+          "times": "8:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 29.01,
+          "times": "8:00pm-7:59am"
+        }
+      },
+      "solar_fit_c_kwh": "tiered: 2c day, 7.21c evening, 4.34c overnight",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 3300,
+        "now": 3270,
+        "discounts": 1
+      },
+      "meter_type_required": "Smart Meter"
+    },
+    {
+      "plan_id": "FXP1125561SRE1",
+      "provider": "Future X Power",
+      "plan_name": "Energex - RESI Time of Use FY27",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 177.85,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.79,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.98,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.3,
+          "times": "12:00am-10:59am, 9:00pm-11:59pm"
+        }
+      },
+      "solar_fit_c_kwh": "+3",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3270,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "LCL1116744MRE1",
+      "provider": "Energy Locals Retail",
+      "plan_name": "Home Choice",
+      "contract": "Environmental options, 1 special offer",
+      "supply_charge_c_per_day": 176.07,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.3,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.91,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.04,
+          "times": "12:00am-10:59am, 9:00pm-11:59pm"
+        }
+      },
+      "solar_fit_c_kwh": "tiered: 10c peak(4-9pm), 3.5c off-peak(9pm-10am), 1.5c shoulder(10am-4pm)",
+      "greenpower": "50-100% GreenPower, 50% = $0.0225/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3320,
+        "discounts": 0
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "1ST1122755MRE1",
+      "provider": "1st Energy",
+      "plan_name": "1st Quartz - Time of Use",
+      "contract": "Ongoing benefit period",
+      "supply_charge_c_per_day": 174.24,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 46.75,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.82,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 24.75,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "tiered: 1c first 5kWh/day, 0.1c thereafter",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3360,
+        "discounts": 0
+      },
+      "meter_type_required": "Smart Meter/no-comms"
+    },
+    {
+      "plan_id": "AMB1126217SRE1",
+      "provider": "Amber Electric",
+      "plan_name": "Standing Offer: TOU",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 177.85,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 47.79,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "rate_c_kwh": 6.98,
+          "times": "11:00am-3:59pm"
+        },
+        "shoulder": {
+          "rate_c_kwh": 25.3,
+          "times": "9:00pm-10:59am"
+        }
+      },
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "100% GreenPower $0.008008/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3440,
+        "discounts": 0
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "TAN1128308SRE1",
+      "provider": "Tango Energy",
+      "plan_name": "Solar Sharer Offer",
+      "contract": "No lock-in, 1 condition",
+      "supply_charge_c_per_day": 177.85,
+      "time_of_use_rates": {
+        "peak": {
+          "rate_c_kwh": 48.9,
+          "times": "4:00pm-8:59pm"
+        },
+        "off_peak": {
+          "block": "11:00am-1:59pm: first 24kWh/day 0.00c, remaining 8.10c"
+        },
+        "shoulder": {
+          "rate_c_kwh": 26.41,
+          "times": "9:00pm-10:59am"
+        },
+        "shoulder1": {
+          "rate_c_kwh": 8.1,
+          "times": "2:00pm-3:59pm"
+        }
+      },
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": null,
+      "estimated_annual_cost_generic_high_tier": 3110,
+      "meter_type_required": "All meter types",
+      "notes": "Household-tailored cost was not preserved for this plan; only the generic High-tier (22.1kWh/day) detail-page estimate is available."
+    }
+  ],
+  "single_rate_plans": [
+    {
+      "plan_id": "AMB1139006MRE1",
+      "provider": "Amber Electric",
+      "plan_name": "Battery + Solar: Variable Wholesale Prices (estimate)",
+      "contract": "No lock-in, 3 conditions apply, membership fee",
+      "supply_charge_c_per_day": 122.83,
+      "usage_charge_c_kwh": 13.29,
+      "solar_fit_c_kwh": "+6.93 (variable, wholesale pass-through, guaranteed minimum 0c/kWh over a financial year)",
+      "greenpower": "100% GreenPower optional add-on, $0.00801/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 1570,
+        "discounts": 0,
+        "note": "includes membership fee, no discounts available"
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1200,
+        "medium": 1460,
+        "high": 1820
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "GLO1149313MRE1",
+      "provider": "GloBird Energy",
+      "plan_name": "BOOST Residential (Flat Rate)-Energex",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 137.5,
+      "usage_charge_c_kwh": "block: 23.21c first 25kWh/day, 24.75c thereafter",
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 2540,
+        "now": 2490,
+        "discounts": 1
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1290,
+          "now": 1240
+        },
+        "medium": {
+          "was": 1750,
+          "now": 1700
+        },
+        "high": {
+          "was": 2380,
+          "now": 2330
+        }
+      },
+      "meter_type_required": "Basic Meter"
+    },
+    {
+      "plan_id": "ENE888446MRE10",
+      "provider": "EnergyAustralia",
+      "plan_name": "QLD Seniors Offer",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.01,
+      "usage_charge_c_kwh": 27.97,
+      "solar_fit_c_kwh": "+4",
+      "greenpower": "30-100% GreenPower, 30% = $0.0495/kWh",
+      "estimated_annual_cost_tailored": {
+        "was": 3040,
+        "now": 2650,
+        "discounts": 1
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1650,
+          "now": 1460
+        },
+        "medium": {
+          "was": 2200,
+          "now": 1940
+        },
+        "high": {
+          "was": 2960,
+          "now": 2610
+        }
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "KOG1060603MRE1",
+      "provider": "Kogan Energy",
+      "plan_name": "Kogan Energy with free FIRST",
+      "contract": "No lock-in, 1 special offer",
+      "supply_charge_c_per_day": 103.92,
+      "usage_charge_c_kwh": 26.23,
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2730,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1270,
+        "medium": 1790,
+        "high": 2500
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "PSH1060558MRE1",
+      "provider": "Powershop",
+      "plan_name": "Power House",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 103.92,
+      "usage_charge_c_kwh": 26.23,
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "100% GreenPower $0.011/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 2730,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1270,
+        "medium": 1790,
+        "high": 2500
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "NTR1143824MRE1",
+      "provider": "Nectr",
+      "plan_name": "Nectr Power Perks",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 170.07,
+      "usage_charge_c_kwh": 25.25,
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 2940,
+        "now": 2740,
+        "discounts": 2
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1480,
+          "now": 1280
+        },
+        "medium": {
+          "was": 1980,
+          "now": 1780
+        },
+        "high": {
+          "was": 2660,
+          "now": 2460
+        }
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "ALI1114251MRE4",
+      "provider": "Alinta Energy",
+      "plan_name": "HomeDeal Smart - Single Rate",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 168.97,
+      "usage_charge_c_kwh": 24.62,
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2760,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1460,
+        "medium": 1940,
+        "high": 2610
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "FEA1136860MRE1",
+      "provider": "Flipped Energy",
+      "plan_name": "Anytime Switched On 2.2!",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 118.6,
+      "usage_charge_c_kwh": 27.32,
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 2820,
+        "now": 2790,
+        "discounts": 1
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1360,
+          "now": 1330
+        },
+        "medium": {
+          "was": 1900,
+          "now": 1870
+        },
+        "high": {
+          "was": 2640,
+          "now": 2610
+        }
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "ENG1111339MRE1",
+      "provider": "ENGIE",
+      "plan_name": "QLD _ ENGIE Perks Elec",
+      "contract": "1 condition, 1 special offer",
+      "supply_charge_c_per_day": 192.01,
+      "usage_charge_c_kwh": "block: 27.97c first 13kWh/day, 27.97c thereafter (identical tiers - effectively flat)",
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 3210,
+        "now": 2880,
+        "discounts": 1
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1650,
+          "now": 1490
+        },
+        "medium": {
+          "was": 2200,
+          "now": 1980
+        },
+        "high": {
+          "was": 2960,
+          "now": 2660
+        }
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "COV1147497MRE1",
+      "provider": "CovaU",
+      "plan_name": "Freedom Residential Single",
+      "contract": "1 special offer",
+      "supply_charge_c_per_day": 185.97,
+      "usage_charge_c_kwh": 32.25,
+      "solar_fit_c_kwh": "+3",
+      "greenpower": "50-100% GreenPower, 50% = $0.0275/kWh",
+      "estimated_annual_cost_tailored": {
+        "was": 3460,
+        "now": 2930,
+        "discounts": 1
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1780,
+          "now": 1580
+        },
+        "medium": {
+          "was": 2410,
+          "now": 2100
+        },
+        "high": {
+          "was": 3280,
+          "now": 2820
+        }
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "ORI1133160MRE1",
+      "provider": "Origin Energy",
+      "plan_name": "Origin Affinity Variable ePlus Ongoing - One Big Switch",
+      "contract": "No lock-in, 2 conditions",
+      "supply_charge_c_per_day": 182.41,
+      "usage_charge_c_kwh": 26.58,
+      "solar_fit_c_kwh": "+3",
+      "greenpower": "50-100% GreenPower, 50% = $0.0225/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 2930,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1570,
+        "medium": 2090,
+        "high": 2810
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "OVO704507MRE23",
+      "provider": "OVO Energy",
+      "plan_name": "The One Plan",
+      "contract": "No lock-in, 1 special offer",
+      "supply_charge_c_per_day": 151.69,
+      "usage_charge_c_kwh": 27.13,
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower $0.022/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 2930,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1480,
+        "medium": 2010,
+        "high": 2750
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "AGL1055581MRE3",
+      "provider": "AGL",
+      "plan_name": "Residential Seniors Saver - New To AGL",
+      "contract": "2 conditions, 1 special offer",
+      "supply_charge_c_per_day": 180.49,
+      "usage_charge_c_kwh": "block: 26.29c first 379kWh/year, 26.29c thereafter (identical tiers - effectively flat)",
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower $0.011/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 2950,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1550,
+        "medium": 2070,
+        "high": 2780
+      },
+      "meter_type_required": "All meter types",
+      "notes": "Flagged by site as current retailer's best offer available; $1,380 more than the lowest priced plan found at time of collection."
+    },
+    {
+      "plan_id": "RED21240SRE13",
+      "provider": "Red Energy",
+      "plan_name": "Standing Offer",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.01,
+      "usage_charge_c_kwh": 27.97,
+      "solar_fit_c_kwh": "+5",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 2980,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1650,
+        "medium": 2200,
+        "high": 2960
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "MOM1144193MRE2",
+      "provider": "Momentum Energy",
+      "plan_name": "Home Comfort Electricity",
+      "contract": "1 special offer",
+      "supply_charge_c_per_day": 188.1,
+      "usage_charge_c_kwh": 26.84,
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower $0.0352/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3030,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1600,
+        "medium": 2130,
+        "high": 2860
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "SUM1051369MRE2",
+      "provider": "Sumo",
+      "plan_name": "Sumo Sunrise Plus Residential Single Rate",
+      "contract": "1 condition, 1 special offer",
+      "supply_charge_c_per_day": 118,
+      "usage_charge_c_kwh": 30,
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "was": 3180,
+        "now": 3080,
+        "discounts": 1
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": {
+          "was": 1450,
+          "now": 1350
+        },
+        "medium": {
+          "was": 2040,
+          "now": 1940
+        },
+        "high": {
+          "was": 2850,
+          "now": 2750
+        }
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "DIA1122701MRE2",
+      "provider": "Diamond Energy",
+      "plan_name": "Diamond Everyday - Single Rate",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.02,
+      "usage_charge_c_kwh": 27.97,
+      "solar_fit_c_kwh": "+3.1",
+      "greenpower": "50-100% GreenPower, 50% = $0.0275/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3090,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1650,
+        "medium": 2200,
+        "high": 2960
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "FXP1125551SRE1",
+      "provider": "Future X Power",
+      "plan_name": "Energex - RESI Anytime FY27",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.02,
+      "usage_charge_c_kwh": 27.97,
+      "solar_fit_c_kwh": "+3",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3090,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1650,
+        "medium": 2200,
+        "high": 2960
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "NEX1119447SRE1",
+      "provider": "Next Business Energy",
+      "plan_name": "NBE Standing Offer",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.01,
+      "usage_charge_c_kwh": "block: 27.97c first 27.4kWh/day, 27.97c thereafter (identical tiers - effectively flat)",
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3150,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1650,
+        "medium": 2200,
+        "high": 2960
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "FP11145354MRE1",
+      "provider": "Flow Power",
+      "plan_name": "Flow Home",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 140.2,
+      "usage_charge_c_kwh": 30.19,
+      "solar_fit_c_kwh": "+2",
+      "greenpower": "100% GreenPower included",
+      "estimated_annual_cost_tailored": {
+        "now": 3160,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1540,
+        "medium": 2130,
+        "high": 2950
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "LCL1116727MRE1",
+      "provider": "Energy Locals Retail",
+      "plan_name": "Home Choice",
+      "contract": "1 special offer",
+      "supply_charge_c_per_day": 190.09,
+      "usage_charge_c_kwh": 27.69,
+      "solar_fit_c_kwh": "tiered: 3c for 0-5kWh/day, 1c for 5kWh+/day",
+      "greenpower": "50-100% GreenPower, 50% = $0.0225/kWh",
+      "estimated_annual_cost_tailored": {
+        "now": 3170,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1640,
+        "medium": 2180,
+        "high": 2930
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "1ST1122751MRE1",
+      "provider": "1st Energy",
+      "plan_name": "1st Quartz - Single Rate",
+      "contract": "Ongoing benefit period",
+      "supply_charge_c_per_day": 188.1,
+      "usage_charge_c_kwh": 27.39,
+      "solar_fit_c_kwh": "tiered: 1c first 5kWh/day, 0.1c thereafter",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3190,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1620,
+        "medium": 2160,
+        "high": 2900
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "DOD14000SRE11",
+      "provider": "Dodo",
+      "plan_name": "Residential Standing",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.02,
+      "usage_charge_c_kwh": 27.97,
+      "solar_fit_c_kwh": "+1",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3210,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1650,
+        "medium": 2200,
+        "high": 2960
+      },
+      "meter_type_required": "All meter types"
+    },
+    {
+      "plan_id": "ELU1021358SRE6",
+      "provider": "Energy Locals Urban",
+      "plan_name": "Standing Offer",
+      "contract": "No lock-in",
+      "supply_charge_c_per_day": 192.02,
+      "usage_charge_c_kwh": 27.97,
+      "solar_fit_c_kwh": "+0",
+      "greenpower": "none",
+      "estimated_annual_cost_tailored": {
+        "now": 3260,
+        "discounts": 0
+      },
+      "estimated_annual_cost_generic_tiers": {
+        "low": 1650,
+        "medium": 2200,
+        "high": 2960
+      },
+      "meter_type_required": "All meter types"
+    }
+  ]
+}

@@ -6,6 +6,14 @@ All five Lambdas are implemented and deployed: `PollerFunction` calls the real S
 
 Both SNS topics (`powerplant-alerts`, `powerplant-reports`) have a confirmed email subscription.
 
+## Overview
+
+Two things about your own site need to be known before configuring this for a new install:
+
+**Solar + battery sizing.** The inverter's serial number (`config.solax.inverterSn`) comes from the SolaX portal; the battery's is optional — `PollerFunction` auto-discovers it if left as the placeholder. There's no config field for the inverter's rated power (read live from the SolaX API), but the battery's usable capacity matters directly: `config.gridDischarge.assumedUsableCapacityKwh` is the fallback used whenever a live capacity reading isn't available, and `config.batteryControl`'s charge-target percentages and `config.gridDischarge`'s reserve/safety-margin percentages should be sized against your actual battery, not copied from another site.
+
+**Electricity plan.** `config.tariff` needs your plan's complete time-of-use structure — every import rate window (start/end time + $/kWh) and the feed-in rate, including any premium export window your plan might offer (`config.gridDischarge.peakFeedInRate`/`windowStartTime`/`windowEndTime`). Pull this straight from your retailer's plan summary or a recent bill — not every plan has a discounted overnight window or an export premium, and whether `BatteryControlFunction`'s overnight charging or `GridDischargeFunction`'s evening export are worth running at all depends entirely on what your specific plan actually offers. [docs/electricity-plan-comparison.md](docs/electricity-plan-comparison.md) works through a real example — comparing the deployed plan against 46 alternatives available to this site, and why the household's specific usage pattern (not the plan's headline numbers) is what actually decides the winner.
+
 ## Structure
 
 ```
@@ -43,6 +51,8 @@ PowerPlant/
 │   ├── PowerPlant_Project_Brief.md
 │   ├── solax-apis.md              # SolaX Cloud OpenAPI reference (source for solax-client.js)
 │   ├── battery-charge-logic.md    # Weather-driven charge control logic + worked examples — read before enabling live
+│   ├── electricity-plan-comparison.md    # Retail plan comparison vs. the deployed tariff — sanitized, no exact site location
+│   ├── electricity-plan-comparison.json  # Same data, structured — sanitized companion to the .md above
 │   └── README.md
 ├── scripts/
 │   └── deploy.sh

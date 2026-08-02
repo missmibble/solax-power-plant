@@ -28,3 +28,8 @@ dist/
 
 # macOS
 .DS_Store
+
+# data files (raw, may contain real site location/usage details — see
+# docs/electricity-plan-comparison.md for the sanitized version committed to the repo)
+agl-plans.txt
+electricity_plans_north_maleny_4552.json
