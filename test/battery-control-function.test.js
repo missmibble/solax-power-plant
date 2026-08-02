@@ -41,14 +41,15 @@ jest.mock('@aws-sdk/client-bedrock-runtime', () => ({
 }), { virtual: true });
 
 jest.mock('powerplant-shared', () => {
-    const { localDateString } = require('../lambda/Utilities/tariff');
+    const { localDateString, findImportRateWindow } = require('../lambda/Utilities/tariff');
     return {
         logInfo: jest.fn(),
         logError: jest.fn(),
         BUSINESS_TYPE: { RESIDENTIAL: 1 },
         getAccessToken: (...args) => mockGetAccessToken(...args),
         setInverterSelfUseMode: (...args) => mockSetInverterSelfUseMode(...args),
-        localDateString
+        localDateString,
+        findImportRateWindow
     };
 }, { virtual: true });
 
@@ -292,6 +293,40 @@ describe('BatteryControlFunction', () => {
                 { totalYield: 105, totalImportEnergy: 51, totalExportEnergy: 5 }
             ];
             expect(summarizeUsage(readings).minBatterySOC).toBeUndefined();
+        });
+
+        test('omits byWindow when no tariff is passed', () => {
+            const readings = [
+                { totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5 },
+                { totalYield: 108, totalImportEnergy: 53, totalExportEnergy: 6.5 }
+            ];
+            expect(summarizeUsage(readings).byWindow).toBeUndefined();
+        });
+
+        // Regression coverage for the "daytime load" mischaracterization found
+        // in production: a whole-day import total (3.2 kWh) looked like it
+        // could be daytime household load exceeding a full battery, but was
+        // actually almost entirely expected overnight grid-charging. byWindow
+        // is what lets that distinction be made instead of guessed at.
+        test('breaks import/export down by tariff window rather than one whole-window total', () => {
+            const tariff = {
+                timezone: 'UTC',
+                importRates: [
+                    { label: 'night-ev-charge', startTime: '00:00', endTime: '06:00', rate: 0.08 },
+                    { label: 'offpeak-midday', startTime: '09:00', endTime: '16:00', rate: 0.20141 }
+                ]
+            };
+            const readings = [
+                { Timestamp: Date.UTC(2026, 0, 1, 0, 30) / 1000, totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5 },
+                { Timestamp: Date.UTC(2026, 0, 1, 1, 30) / 1000, totalYield: 102, totalImportEnergy: 53, totalExportEnergy: 5 },
+                { Timestamp: Date.UTC(2026, 0, 1, 12, 0) / 1000, totalYield: 110, totalImportEnergy: 53.2, totalExportEnergy: 6 }
+            ];
+
+            const summary = summarizeUsage(readings, tariff);
+
+            expect(summary.importKwh).toBe(3.2);
+            expect(summary.byWindow['night-ev-charge']).toEqual({ importKwh: 3, exportKwh: 0 });
+            expect(summary.byWindow['offpeak-midday']).toEqual({ importKwh: 0.2, exportKwh: 1 });
         });
     });
 

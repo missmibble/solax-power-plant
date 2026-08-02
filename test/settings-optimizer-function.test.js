@@ -63,7 +63,7 @@ function validAiResponseText(overrides = {}) {
 describe('SettingsOptimizerFunction', () => {
     let summarizeBatteryControlHistory, summarizeGridDischargeHistory, parseOptimizationRecommendation,
         buildRecommendations, buildOptimizationRecord, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
-        GRID_DISCHARGE_SETTINGS_PREFIX, handler;
+        GRID_DISCHARGE_SETTINGS_PREFIX, SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler;
 
     function findPutCalls() {
         return mockDynamoSend.mock.calls.map(call => call[0]).filter(cmd => cmd.__type === 'Put');
@@ -89,7 +89,7 @@ describe('SettingsOptimizerFunction', () => {
         ({
             summarizeBatteryControlHistory, summarizeGridDischargeHistory, parseOptimizationRecommendation,
             buildRecommendations, buildOptimizationRecord, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
-            GRID_DISCHARGE_SETTINGS_PREFIX, handler
+            GRID_DISCHARGE_SETTINGS_PREFIX, SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler
         } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
     });
 
@@ -344,6 +344,76 @@ describe('SettingsOptimizerFunction', () => {
 
             const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
             expect(statusPut.input.Item.applied).toBe(false);
+        });
+
+        test('a dashboard-saved autoApply: true override applies the recommendation even though config.autoApply is false', async () => {
+            // BASE_CONFIG.autoApply is false — this proves the dashboard override,
+            // not the config default, is what's actually driving the apply here.
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(validAiResponseText({
+                chargeUpperSocSunny: 45, confidence: 'high', reasoning: 'Consistently ran flat on sunny nights.'
+            })));
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get' && command.input.Key.DeviceSn === `${SETTINGS_OPTIMIZER_SETTINGS_PREFIX}H34ABCDEFG5001`) {
+                    return Promise.resolve({ Item: { autoApply: true } });
+                }
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type !== 'Query') return Promise.resolve({});
+                if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                    return Promise.resolve({
+                        Items: [
+                            { classification: 'sunny', previousAssessment: { accurate: false } },
+                            { classification: 'sunny', previousAssessment: { accurate: false } },
+                            { classification: 'sunny', previousAssessment: { accurate: false } }
+                        ]
+                    });
+                }
+                return Promise.resolve({ Items: [] });
+            });
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            const batteryPut = findPutCalls().find(c => c.input.Item.DeviceSn === `${BATTERY_SETTINGS_PREFIX}H34ABCDEFG5001`);
+            expect(batteryPut).toBeDefined();
+            expect(batteryPut.input.Item.chargeUpperSocSunny).toBe(45);
+
+            const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
+            expect(statusPut.input.Item.applied).toBe(true);
+            expect(statusPut.input.Item.autoApply).toBe(true);
+        });
+
+        test('a dashboard-saved autoApply: false override holds back application even when config.autoApply is true', async () => {
+            process.env.SETTINGS_OPTIMIZER_CONFIG = JSON.stringify({ ...BASE_CONFIG, autoApply: true });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(validAiResponseText({
+                chargeUpperSocSunny: 45, confidence: 'high', reasoning: 'Consistently ran flat on sunny nights.'
+            })));
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get' && command.input.Key.DeviceSn === `${SETTINGS_OPTIMIZER_SETTINGS_PREFIX}H34ABCDEFG5001`) {
+                    return Promise.resolve({ Item: { autoApply: false } });
+                }
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type !== 'Query') return Promise.resolve({});
+                if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                    return Promise.resolve({
+                        Items: [
+                            { classification: 'sunny', previousAssessment: { accurate: false } },
+                            { classification: 'sunny', previousAssessment: { accurate: false } },
+                            { classification: 'sunny', previousAssessment: { accurate: false } }
+                        ]
+                    });
+                }
+                return Promise.resolve({ Items: [] });
+            });
+            ({ handler } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            expect(findPutCalls().filter(c => c.input.Item.DeviceSn.includes('SETTINGS#'))).toHaveLength(0);
+
+            const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
+            expect(statusPut.input.Item.applied).toBe(false);
+            expect(statusPut.input.Item.autoApply).toBe(false);
         });
 
         test('autoApply run: writes the recommended value into the battery settings override, preserving existing fields', async () => {

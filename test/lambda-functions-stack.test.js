@@ -100,6 +100,17 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
+    test('DashboardApiFunction gets the settings-optimizer-settings autoApply default as an env var, sourced from config.settingsOptimizer', () => {
+        template.hasResourceProperties('AWS::Lambda::Function', {
+            FunctionName: config.lambda.dashboardApiFunction.functionName,
+            Environment: {
+                Variables: Match.objectLike({
+                    SETTINGS_OPTIMIZER_DEFAULT_AUTO_APPLY: String(config.settingsOptimizer.autoApply === true)
+                })
+            }
+        });
+    });
+
     test('DashboardApiFunction gets battery-settings defaults (including dry-run) as env vars, sourced from config.batteryControl', () => {
         template.hasResourceProperties('AWS::Lambda::Function', {
             FunctionName: config.lambda.dashboardApiFunction.functionName,
@@ -438,6 +449,14 @@ describe('LambdaFunctionsStack', () => {
             HttpMethod: 'GET',
             AuthorizationType: 'COGNITO_USER_POOLS',
             ResourceId: { Ref: Object.keys(resources)[0] }
+        });
+    });
+
+    test('creates a /settings-optimizer-settings API resource with GET and PUT methods', () => {
+        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'settings-optimizer-settings' });
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'PUT',
+            AuthorizationType: 'COGNITO_USER_POOLS'
         });
     });
 

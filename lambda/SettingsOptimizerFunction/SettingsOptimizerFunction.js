@@ -21,8 +21,12 @@ const GRID_DISCHARGE_STATUS_PREFIX = 'GRID_DISCHARGE#';
 // recommendations — see GridDischargeFunction.js).
 const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
 const GRID_DISCHARGE_SETTINGS_PREFIX = 'GRID_DISCHARGE_SETTINGS#';
+// This function's own dashboard-editable setting — just autoApply itself
+// ("Full automation" on the dashboard's AI card). Same fixed-key-row pattern
+// as the other two settings prefixes above, read the same way via loadOverride.
+const SETTINGS_OPTIMIZER_SETTINGS_PREFIX = 'SETTINGS_OPTIMIZER_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
-// This function's own weekly recommendation record.
+// This function's own nightly recommendation record.
 const STATUS_RECORD_PREFIX = 'SETTINGS_OPTIMIZATION#';
 
 const SYSTEM_PROMPT = `You are reviewing a week of operational history for a home solar + battery system, \
@@ -351,12 +355,18 @@ exports.handler = async () => {
         const nowSeconds = Math.floor(Date.now() / 1000);
         const sinceSeconds = nowSeconds - config.lookbackDays * 24 * 60 * 60;
 
-        const [batteryOverride, gridOverride, batteryRecords, gridRecords] = await Promise.all([
+        const [batteryOverride, gridOverride, optimizerSettingsOverride, batteryRecords, gridRecords] = await Promise.all([
             loadOverride(BATTERY_SETTINGS_PREFIX, deviceSn),
             loadOverride(GRID_DISCHARGE_SETTINGS_PREFIX, deviceSn),
+            loadOverride(SETTINGS_OPTIMIZER_SETTINGS_PREFIX, deviceSn),
             queryRecentRecords(BATTERY_STATUS_PREFIX, deviceSn, sinceSeconds),
             queryRecentRecords(GRID_DISCHARGE_STATUS_PREFIX, deviceSn, sinceSeconds)
         ]);
+
+        // The dashboard's "Full automation" toggle overrides config.autoApply the
+        // same way every other dashboard-editable setting in this app does — an
+        // unset override, or none saved at all, falls back to the static config value.
+        const effectiveAutoApply = optimizerSettingsOverride?.autoApply ?? config.autoApply;
 
         const currentValues = {
             chargeUpperSocSunny: batteryOverride?.chargeUpperSocSunny ?? config.batteryControlDefaults.chargeUpperSocSunny,
@@ -384,16 +394,16 @@ exports.handler = async () => {
         });
 
         let applied = false;
-        if (config.autoApply) {
+        if (effectiveAutoApply) {
             applied = await applyRecommendations(deviceSn, recommendations, batteryOverride, gridOverride);
         }
 
-        const message = formatMessage(recommendations, aiRecommendation, config.autoApply);
-        logInfo('Settings optimization recommendation', { recommendations, applied, autoApply: config.autoApply });
+        const message = formatMessage(recommendations, aiRecommendation, effectiveAutoApply);
+        logInfo('Settings optimization recommendation', { recommendations, applied, autoApply: effectiveAutoApply });
 
         await publish(process.env.REPORTS_TOPIC_ARN, `PowerPlant settings optimizer${applied ? ' — applied' : ''}`, message);
         await storeStatusRecord(buildOptimizationRecord(deviceSn, nowSeconds, {
-            recommendations, aiRecommendation, applied, autoApply: config.autoApply,
+            recommendations, aiRecommendation, applied, autoApply: effectiveAutoApply,
             reasoning: aiRecommendation?.reasoning || 'No parsable recommendation returned.'
         }));
 
@@ -421,3 +431,4 @@ module.exports.buildOptimizationRecord = buildOptimizationRecord;
 module.exports.STATUS_RECORD_PREFIX = STATUS_RECORD_PREFIX;
 module.exports.BATTERY_SETTINGS_PREFIX = BATTERY_SETTINGS_PREFIX;
 module.exports.GRID_DISCHARGE_SETTINGS_PREFIX = GRID_DISCHARGE_SETTINGS_PREFIX;
+module.exports.SETTINGS_OPTIMIZER_SETTINGS_PREFIX = SETTINGS_OPTIMIZER_SETTINGS_PREFIX;

@@ -98,23 +98,17 @@
       <span class="widget-sub" id="batteryDecisionAppliesTo">–</span>
       <span class="widget-sub" id="batteryDecisionMeta">–</span>
     </div>
-    <div class="widget" id="previousAssessmentWidget" hidden>
-      <span class="widget-label">Last night's accuracy</span>
-      <span class="widget-value" id="previousAssessmentAccurate">–</span>
-      <span class="widget-sub" id="previousAssessmentText">–</span>
-    </div>
-    <div class="widget" id="settingsOptimizationWidget" hidden>
-      <span class="widget-label">Last AI recommendation</span>
-      <span class="widget-value" id="settingsOptimizationSummary">–</span>
-      <span class="widget-sub" id="settingsOptimizationMeta">–</span>
-      <span class="widget-sub" id="settingsOptimizationReasoning">–</span>
-    </div>
   </section>
   <p id="batteryStatusStatus" class="status" hidden></p>
 
-  <section class="insights" id="insightsSection" hidden>
-    <div class="insights-header">
-      <h2>Insights &amp; Recommendation</h2>
+  <!-- Every AI-driven output in the app (the nightly narrative, the battery
+       decision's own hindsight accuracy check, and the settings optimizer's
+       recommendation) plus the one control that governs how much of that AI
+       output is allowed to act on its own — all in one place, rather than
+       scattered across separate cards a reader has to piece together. -->
+  <section class="ai-card" id="aiCardSection" hidden>
+    <div class="ai-card-header">
+      <h2>AI Assessment</h2>
       <button type="button" id="runAssessmentButton">Run assessment now</button>
     </div>
     <p class="insights-meta" id="insightsMeta"></p>
@@ -123,16 +117,68 @@
     <div class="recommendation" id="recommendationBox"></div>
 
     <div class="ai-narrative" id="aiNarrativeBox" hidden>
-      <h3>AI insights</h3>
+      <h3>Nightly narrative</h3>
       <p id="aiNarrativeText"></p>
       <p class="anomalies-label" id="anomaliesLabel"></p>
       <ul id="aiAnomaliesList"></ul>
     </div>
+
+    <div class="ai-subcard" id="previousAssessmentWidget" hidden>
+      <span class="widget-label">Last night's battery accuracy</span>
+      <span class="widget-value" id="previousAssessmentAccurate">–</span>
+      <span class="widget-sub" id="previousAssessmentText">–</span>
+    </div>
+
+    <div class="ai-subcard" id="settingsOptimizationWidget" hidden>
+      <span class="widget-label">Latest settings recommendation</span>
+      <span class="widget-value" id="settingsOptimizationSummary">–</span>
+      <span class="widget-sub" id="settingsOptimizationMeta">–</span>
+      <span class="widget-sub" id="settingsOptimizationReasoning">–</span>
+    </div>
+
+    <form id="settingsOptimizerSettingsForm" class="ai-automation-form">
+      <div class="settings-table-wrap">
+        <table class="settings-table">
+          <thead>
+            <tr>
+              <th scope="col">Setting</th>
+              <th scope="col">What it does</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><label for="settingsOptimizerAutoApply">Full automation</label></th>
+              <td>
+                When on, each night's AI recommendation above is written straight into the live battery/grid
+                discharge settings automatically — no manual save needed. When off (default), the AI only
+                recommends and emails; nothing changes until you apply a value yourself.
+              </td>
+              <td class="value-cell">
+                <label class="toggle-pill toggle-pill--danger">
+                  <input type="checkbox" id="settingsOptimizerAutoApply">
+                  <span class="toggle-pill-track"><span class="toggle-pill-thumb"></span></span>
+                </label>
+                <span class="toggle-pill-state" id="settingsOptimizerAutoApplyState">Recommend only</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <button type="submit" id="settingsOptimizerSettingsSaveButton" class="settings-save-button">Save settings</button>
+      <p id="settingsOptimizerSettingsStatus" class="status" hidden></p>
+    </form>
   </section>
   <p id="insightsStatus" class="status" hidden></p>
 
   <section class="settings" id="batterySettingsSection">
     <h2>Battery Control Settings</h2>
+    <p class="auto-apply-note" id="batterySettingsAutoApplyNote" hidden>
+      🔒 Full automation is on — the AI's nightly recommendation writes the charge targets below
+      automatically, so manual edits to them are locked to avoid the two conflicting. Turn off
+      "Full automation" on the AI Assessment card above to edit them by hand again.
+    </p>
     <form id="batterySettingsForm">
       <div class="settings-table-wrap">
         <table class="settings-table">

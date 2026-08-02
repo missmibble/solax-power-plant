@@ -11,7 +11,8 @@ const {
     BUSINESS_TYPE,
     getAccessToken,
     setInverterSelfUseMode,
-    localDateString
+    localDateString,
+    findImportRateWindow
 } = require('powerplant-shared');
 
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION });
@@ -28,18 +29,24 @@ const SETTINGS_TIMESTAMP = 0; // fixed sort key — one settings row per inverte
 
 const ACCURACY_SYSTEM_PROMPT = `You are reviewing a home battery charge-control decision made yesterday \
 evening for a solar + battery system. You are given yesterday's decision (forecast classification, the \
-reasoning, and the chargeUpperSoc percent that was set) and a summary of today's actual usage (PV yield, \
-grid import/export, and battery SOC range if available). Respond with ONLY a JSON object of the form \
+reasoning, and the chargeUpperSoc percent that was set) and a summary of today's actual usage: PV yield, \
+grid import/export broken down by tariff window (byWindow — so you can see *when* import/export happened, \
+e.g. the overnight night-ev-charge window vs. daytime vs. the evening peak-evening window, not just a single \
+whole-day total), and battery SOC range if available. Respond with ONLY a JSON object of the form \
 {"accurate": boolean, "assessment": string, "usageShouldInfluence": boolean, "usageNote": string} — no text \
 outside the JSON.
 
 "accurate": whether the chargeUpperSoc looks right in hindsight given what actually happened.
 "assessment": 1-2 plain-English sentences explaining the accuracy judgement — e.g. did the battery run flat \
-before solar caught up (target was too low), or stay needlessly full all day (target was too high)?
+before solar caught up (target was too low), or stay needlessly full all day (target was too high)? Ground \
+any claim about *when* something happened in byWindow, not the daily total alone — e.g. import concentrated \
+in night-ev-charge is expected overnight grid-charging, not daytime household load exceeding a full battery, \
+and only cite the latter if byWindow actually shows import during offpeak-midday/peak-evening/shoulder-morning.
 "usageShouldInfluence": whether today's usage pattern (not just weather) suggests the charge target should \
 account for household load, independent of tomorrow's forecast.
-"usageNote": 1 sentence on what about today's usage drove that judgement (e.g. unusually high overnight \
-load) — empty string if usageShouldInfluence is false.`;
+"usageNote": 1 sentence on what about today's usage drove that judgement, citing the specific window (e.g. \
+"import during shoulder-morning suggests the battery ran flat before solar ramped up") — empty string if \
+usageShouldInfluence is false.`;
 
 let cachedCredentials = null; // reused across warm invocations, same pattern as PollerFunction
 let cachedWeatherApiKey = null;
@@ -267,7 +274,7 @@ async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
         const readings = await queryReadingsSince(deviceSn, previous.Timestamp, beforeTimestamp);
         if (readings.length < 2) return null;
 
-        const usageSummary = summarizeUsage(readings);
+        const usageSummary = summarizeUsage(readings, tariff);
 
         const prompt = JSON.stringify({
             yesterdaysDecision: {
@@ -332,7 +339,13 @@ async function queryReadingsSince(deviceSn, startSeconds, endSeconds) {
     return readings;
 }
 
-function summarizeUsage(readings) {
+// tariff is optional (callers that only need the whole-window totals can omit
+// it, same as before this was added) — byWindow is only populated when a
+// tariff with importRates is passed in. Bucketing mirrors ReportFunction.assessUsage:
+// each consecutive-reading delta is tagged with the tariff window the *later*
+// reading falls in, same as the cost-assessment code path, so the two stay
+// consistent with each other.
+function summarizeUsage(readings, tariff) {
     const first = readings[0];
     const last = readings[readings.length - 1];
 
@@ -341,6 +354,30 @@ function summarizeUsage(readings) {
         importKwh: round2(last.totalImportEnergy - first.totalImportEnergy),
         exportKwh: round2(last.totalExportEnergy - first.totalExportEnergy)
     };
+
+    if (tariff?.importRates?.length) {
+        const byWindow = {};
+        for (const w of tariff.importRates) {
+            byWindow[w.label] = { importKwh: 0, exportKwh: 0 };
+        }
+
+        for (let i = 1; i < readings.length; i++) {
+            const deltaImport = readings[i].totalImportEnergy - readings[i - 1].totalImportEnergy;
+            const deltaExport = readings[i].totalExportEnergy - readings[i - 1].totalExportEnergy;
+            const window = findImportRateWindow(tariff, readings[i].Timestamp)?.label;
+            if (!window || !byWindow[window]) continue;
+
+            if (deltaImport > 0) byWindow[window].importKwh += deltaImport;
+            if (deltaExport > 0) byWindow[window].exportKwh += deltaExport;
+        }
+
+        for (const label of Object.keys(byWindow)) {
+            byWindow[label].importKwh = round2(byWindow[label].importKwh);
+            byWindow[label].exportKwh = round2(byWindow[label].exportKwh);
+        }
+
+        summary.byWindow = byWindow;
+    }
 
     const socs = readings.map(r => r.batterySOC).filter(v => typeof v === 'number');
     if (socs.length) {

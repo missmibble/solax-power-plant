@@ -30,9 +30,13 @@ const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
 // unlike battery-settings, this dashboard form doesn't own every field in
 // the row and must not clobber ones it doesn't know about.
 const GRID_DISCHARGE_SETTINGS_PREFIX = 'GRID_DISCHARGE_SETTINGS#';
-// Matches SettingsOptimizerFunction.STATUS_RECORD_PREFIX — its weekly
+// Matches SettingsOptimizerFunction.STATUS_RECORD_PREFIX — its nightly
 // recommendation record, read-only here (this Lambda never writes it).
 const SETTINGS_OPTIMIZATION_PREFIX = 'SETTINGS_OPTIMIZATION#';
+// Matches SettingsOptimizerFunction.SETTINGS_OPTIMIZER_SETTINGS_PREFIX — the
+// dashboard-editable "Full automation" (autoApply) toggle, same fixed-key-row
+// pattern as BATTERY_SETTINGS_PREFIX/GRID_DISCHARGE_SETTINGS_PREFIX above.
+const SETTINGS_OPTIMIZER_SETTINGS_PREFIX = 'SETTINGS_OPTIMIZER_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
 
 // Per-field provenance for a dashboard-editable settings row: 'default' when
@@ -88,6 +92,14 @@ exports.handler = async (event) => {
 
     if (event.resource === '/settings-optimization') {
         return handleSettingsOptimization();
+    }
+
+    if (event.resource === '/settings-optimizer-settings' && event.httpMethod === 'PUT') {
+        return handlePutSettingsOptimizerSettings(event);
+    }
+
+    if (event.resource === '/settings-optimizer-settings') {
+        return handleGetSettingsOptimizerSettings();
     }
 
     return handleReadings(event);
@@ -370,6 +382,75 @@ function formatGridDischargeSettingsResponse(item) {
     };
 }
 
+// Dashboard-editable "Full automation" toggle for SettingsOptimizerFunction —
+// same sentinel-key settings row it reads (SettingsOptimizerFunction.loadOverride
+// with SETTINGS_OPTIMIZER_SETTINGS_PREFIX). Deliberately its own row (not folded
+// into GET /settings-optimization, which is read-only reporting on the latest
+// recommendation) — same separation as GridDischargeFunction's action-trigger
+// POST /grid-discharge vs. its editable GET/PUT /grid-discharge-settings.
+async function handleGetSettingsOptimizerSettings() {
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const result = await docClient.send(new GetCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            Key: { DeviceSn: `${SETTINGS_OPTIMIZER_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP }
+        }));
+        return response(200, formatSettingsOptimizerSettingsResponse(result.Item));
+    } catch (err) {
+        logError('Settings optimizer settings query failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+async function handlePutSettingsOptimizerSettings(event) {
+    let body;
+    try {
+        body = JSON.parse(event.body || '{}');
+    } catch {
+        return response(400, { message: 'Request body must be valid JSON' });
+    }
+
+    const validationError = validateSettingsOptimizerSettings(body);
+    if (validationError) {
+        return response(400, { message: validationError });
+    }
+
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const key = { DeviceSn: `${SETTINGS_OPTIMIZER_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP };
+
+        const existing = await docClient.send(new GetCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Key: key }));
+        const item = {
+            ...existing.Item,
+            ...key,
+            autoApply: body.autoApply,
+            sources: { ...existing.Item?.sources, autoApply: 'dashboard' }
+        };
+
+        await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
+        logInfo('Settings optimizer settings updated', item);
+        return response(200, formatSettingsOptimizerSettingsResponse(item));
+    } catch (err) {
+        logError('Settings optimizer settings update failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+function validateSettingsOptimizerSettings(body) {
+    if (typeof body.autoApply !== 'boolean') return 'autoApply must be a boolean';
+    return null;
+}
+
+function formatSettingsOptimizerSettingsResponse(item) {
+    return {
+        autoApply: item?.autoApply ?? (process.env.SETTINGS_OPTIMIZER_DEFAULT_AUTO_APPLY === 'true'),
+        usingDefaults: !item,
+        sources: {
+            autoApply: fieldSource(item, 'autoApply')
+        }
+    };
+}
+
 // Dashboard-editable overrides for BatteryControlFunction's nightly decision —
 // same sentinel-key settings row it reads (BatteryControlFunction.loadSettingsOverride).
 async function handleGetBatterySettings() {
@@ -613,3 +694,5 @@ module.exports.validateBatterySettings = validateBatterySettings;
 module.exports.formatGridDischargeSettingsResponse = formatGridDischargeSettingsResponse;
 module.exports.validateGridDischargeSettings = validateGridDischargeSettings;
 module.exports.formatSettingsOptimizationResponse = formatSettingsOptimizationResponse;
+module.exports.formatSettingsOptimizerSettingsResponse = formatSettingsOptimizerSettingsResponse;
+module.exports.validateSettingsOptimizerSettings = validateSettingsOptimizerSettings;

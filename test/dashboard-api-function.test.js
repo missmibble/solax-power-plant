@@ -10,7 +10,9 @@ const {
     validateBatterySettings,
     formatGridDischargeSettingsResponse,
     validateGridDischargeSettings,
-    formatSettingsOptimizationResponse
+    formatSettingsOptimizationResponse,
+    formatSettingsOptimizerSettingsResponse,
+    validateSettingsOptimizerSettings
 } = require('../lambda/DashboardApiFunction/DashboardApiFunction');
 
 const config = JSON.parse(
@@ -498,5 +500,54 @@ describe('DashboardApiFunction formatSettingsOptimizationResponse', () => {
         expect(result.recommendations).toBeNull();
         expect(result.confidence).toBeNull();
         expect(result.reasoning).toBeNull();
+    });
+});
+
+describe('DashboardApiFunction formatSettingsOptimizerSettingsResponse', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+        process.env = { ...originalEnv, SETTINGS_OPTIMIZER_DEFAULT_AUTO_APPLY: 'false' };
+    });
+
+    afterEach(() => {
+        process.env = originalEnv;
+    });
+
+    test('falls back to the config default (false) when no override has been saved', () => {
+        expect(formatSettingsOptimizerSettingsResponse(undefined)).toEqual({
+            autoApply: false,
+            usingDefaults: true,
+            sources: { autoApply: 'default' }
+        });
+    });
+
+    test('uses the saved override value when present', () => {
+        expect(formatSettingsOptimizerSettingsResponse({
+            autoApply: true, sources: { autoApply: 'dashboard' }
+        })).toEqual({
+            autoApply: true,
+            usingDefaults: false,
+            sources: { autoApply: 'dashboard' }
+        });
+    });
+
+    test('a row saved before source-tracking existed defaults to "dashboard"', () => {
+        expect(formatSettingsOptimizerSettingsResponse({ autoApply: true }).sources).toEqual({ autoApply: 'dashboard' });
+    });
+
+    test('falls back to true when the env default says so', () => {
+        process.env.SETTINGS_OPTIMIZER_DEFAULT_AUTO_APPLY = 'true';
+        expect(formatSettingsOptimizerSettingsResponse(undefined).autoApply).toBe(true);
+    });
+});
+
+describe('DashboardApiFunction validateSettingsOptimizerSettings', () => {
+    test('accepts a valid payload', () => {
+        expect(validateSettingsOptimizerSettings({ autoApply: true })).toBeNull();
+    });
+
+    test('rejects a non-boolean autoApply field', () => {
+        expect(validateSettingsOptimizerSettings({ autoApply: 'yes' })).toMatch(/autoApply/);
     });
 });

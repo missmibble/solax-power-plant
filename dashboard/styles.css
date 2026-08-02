@@ -67,8 +67,17 @@ h1 {
   color: #1a1a1a;
 }
 
+/* Scales with the viewport instead of a flat cap — a fixed 900px left a wide
+   PC monitor with a narrow column of content and a lot of unused margin on
+   either side, which is what made the settings tables feel compressed (the
+   "what it does" column had nowhere to expand into). Below ~1125px viewport
+   width this still resolves to the original 900px, so phones/tablets and the
+   existing <=640px/480px breakpoints below are unaffected; screens wider than
+   that get progressively more room, capped at 1400px so text-heavy areas
+   (the AI narrative, settings descriptions) don't stretch into unreadably
+   long line lengths on very wide/ultrawide monitors. */
 main {
-  max-width: 900px;
+  max-width: clamp(900px, 80vw, 1400px);
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -247,7 +256,7 @@ main {
   color: #888;
 }
 
-.insights {
+.ai-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -255,7 +264,7 @@ main {
   margin-top: 1.5rem;
 }
 
-.insights-header {
+.ai-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -263,7 +272,7 @@ main {
   flex-wrap: wrap;
 }
 
-.insights-header h2 {
+.ai-card-header h2 {
   margin: 0;
 }
 
@@ -277,9 +286,27 @@ main {
   font-size: 0.85rem;
 }
 
-.insights h2 {
+.ai-card h2 {
   font-size: 1.1rem;
   margin-bottom: 0.25rem;
+}
+
+/* previousAssessmentWidget/settingsOptimizationWidget — nested inside the
+   card now (not standalone grid items), so a top divider separates each
+   AI output from the one above it instead of a card boundary doing that job. */
+.ai-subcard {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ai-automation-form {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  margin-top: 1rem;
 }
 
 .insights-meta {
@@ -390,6 +417,17 @@ main {
   margin-left: 0.35rem;
   color: #888;
   font-size: 0.9rem;
+}
+
+/* A field SettingsOptimizerFunction owns while Full Automation is on — greyed
+   out rather than merely readonly, so it reads as "not yours to edit right
+   now" at a glance instead of blending in with the fields still open for
+   manual changes on the same form. */
+.settings-table input[type="number"]:disabled {
+  background: var(--border);
+  color: #888;
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 /* Marks where a settings value actually came from — empty for a plain
@@ -527,6 +565,17 @@ main {
   line-height: 1.4;
 }
 
+.auto-apply-note {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #a66a00;
+  border-radius: 8px;
+  background: rgba(166, 106, 0, 0.12);
+  color: var(--fg);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 #terminateGridDischargeButton {
   padding: 0.6rem 1.25rem;
   border: 1px solid var(--border);
@@ -588,7 +637,7 @@ main {
   }
 
   .settings,
-  .insights {
+  .ai-card {
     padding: 1rem;
   }
 

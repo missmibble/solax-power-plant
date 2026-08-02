@@ -6,7 +6,7 @@ Every automated decision this app makes, and the exact current setting driving i
 - [docs/grid-discharge-logic.md](grid-discharge-logic.md) — `GridDischargeFunction`
 - [docs/settings-optimizer-logic.md](settings-optimizer-logic.md) — `SettingsOptimizerFunction`
 
-Values below are the real deployed defaults (`config/dev-powerplant.local.json`), noted wherever the public template (`config/dev-powerplant.json`) differs. Dashboard-editable fields (via `/battery-settings` or `/grid-discharge-settings`) are marked **[editable]** — those can currently be at a different, human- or `SettingsOptimizerFunction`-set value without a redeploy; the config value is only the fallback when no override row exists. The Battery Control Settings panel now badges each value with where it actually came from (blank for a human-set value, "default" for an untouched config fallback, "AI recommended" for something `SettingsOptimizerFunction` auto-applied) — see docs/settings-optimizer-logic.md's `sources` mechanics — and a "Last AI recommendation" widget (`GET /settings-optimization`) shows the AI's latest full weekly verdict regardless of whether `autoApply` is on.
+Values below are the real deployed defaults (`config/dev-powerplant.local.json`), noted wherever the public template (`config/dev-powerplant.json`) differs. Dashboard-editable fields (via `/battery-settings`, `/grid-discharge-settings`, or `/settings-optimizer-settings`) are marked **[editable]** — those can currently be at a different, human- or `SettingsOptimizerFunction`-set value without a redeploy; the config value is only the fallback when no override row exists. The Battery Control Settings panel now badges each value with where it actually came from (blank for a human-set value, "default" for an untouched config fallback, "AI recommended" for something `SettingsOptimizerFunction` auto-applied) — see docs/settings-optimizer-logic.md's `sources` mechanics. All AI-driven output — the nightly narrative, the battery-decision accuracy check, and this function's own recommendation (`GET /settings-optimization`, updated nightly now, not weekly) — plus the "Full automation" toggle live together on one consolidated AI card, rather than scattered across separate widgets.
 
 ## Tariff (`config.tariff`, `config.location.timezone`)
 
@@ -79,15 +79,15 @@ When SOC data is available for the peak window, further distinguishes "already d
 
 ## SettingsOptimizerFunction — self-tuning bounds
 
-Reviews the five **[editable]** values above (`chargeUpperSocSunny`, `chargeUpperSocPartlyCloudy`, `chargeUpperSocOvercast`, `gridDischarge.fallbackReservePercent`, `gridDischarge.safetyMarginPercent`) weekly and proposes changes, gated by two rules enforced in code regardless of what the AI recommends:
+Reviews the five **[editable]** values above (`chargeUpperSocSunny`, `chargeUpperSocPartlyCloudy`, `chargeUpperSocOvercast`, `gridDischarge.fallbackReservePercent`, `gridDischarge.safetyMarginPercent`) nightly (was weekly — see docs/settings-optimizer-logic.md) and proposes changes, gated by two rules enforced in code regardless of what the AI recommends:
 
 | Rule | Value |
 |---|---|
 | Minimum sample size to consider a change | **3** nights of relevant history (`minSampleSize`) |
 | Maximum adjustment per run | **±15 percentage points** from the current effective value, and clamped to `[0, 100]` overall (`maxAdjustmentPercent`) |
-| Lookback window | **7 days** (`lookbackDays`) |
-| `autoApply` | **false** — recommends and emails only; writes to the settings-override rows only when set `true` |
-| Schedule | **cron(0 12 ? \* SUN \*)** = Sunday 22:00 Brisbane |
+| Lookback window | **7 days**, refreshed nightly rather than once a week (`lookbackDays`) |
+| Full automation **[editable]** | `autoApply` = **false** — recommends and emails only; writes to the settings-override rows only when effectively `true`. Dashboard toggle on the AI card ("Full automation"), confirm-gated — the one toggle that governs whether the AI can rewrite the other editable settings above without a human applying them first |
+| Schedule | **cron(0 12 \* \* ? \*)** = 22:00 Brisbane, every night (was **cron(0 12 ? \* SUN \*)** = Sunday only) |
 | Bedrock model | `au.anthropic.claude-haiku-4-5-20251001-v1:0` (cross-region inference profile; public template unset) |
 
 ## Safety posture summary
@@ -98,6 +98,6 @@ Every control-relevant function (writes to the inverter, or writes settings that
 |---|---|---|---|
 | `BatteryControlFunction` | `dryRun` | `true` | Yes — "Control mode" toggle on `/battery-settings`, confirm-gated, no redeploy needed |
 | `GridDischargeFunction` | `dryRun` | `true` | Yes — "Control mode" toggle on `/grid-discharge-settings`, confirm-gated, no redeploy needed |
-| `SettingsOptimizerFunction` | `autoApply` | `false` | No — config-only |
+| `SettingsOptimizerFunction` | `autoApply` | `false` | Yes — "Full automation" toggle on the AI card (`/settings-optimizer-settings`), confirm-gated, no redeploy needed |
 
-None of the above have been flipped live yet. Each has an explicit "known risks" / "how to validate before enabling" section in its own logic doc — read those before changing any of the three flags above. `BatteryControlFunction`'s and `GridDischargeFunction`'s are now a single dashboard click rather than a config edit + redeploy — see the "Dashboard-editable settings" section of each function's logic doc for what that removes in terms of built-in friction. `GridDischargeFunction`'s is arguably the more consequential of the two to leave unattended, given the still-open "unconfirmed load behavior" risk in docs/grid-discharge-logic.md.
+None of the above have been flipped live yet. Each has an explicit "known risks" / "how to validate before enabling" section in its own logic doc — read those before changing any of the three flags above. All three are now a single dashboard click rather than a config edit + redeploy — see the "Dashboard-editable settings" section of each function's logic doc for what that removes in terms of built-in friction. `SettingsOptimizerFunction`'s is arguably the most consequential of the three despite never calling SolaX directly, since turning it on lets the AI rewrite the other two functions' own settings unattended; `GridDischargeFunction`'s is the most consequential of the two that do call SolaX directly, given the still-open "unconfirmed load behavior" risk in docs/grid-discharge-logic.md.

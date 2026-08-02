@@ -44,7 +44,7 @@ const els = {
   batteryDecisionAppliesTo: document.getElementById('batteryDecisionAppliesTo'),
   batteryDecisionMeta: document.getElementById('batteryDecisionMeta'),
   batteryStatusStatus: document.getElementById('batteryStatusStatus'),
-  insightsSection: document.getElementById('insightsSection'),
+  aiCardSection: document.getElementById('aiCardSection'),
   insightsStatus: document.getElementById('insightsStatus'),
   insightsMeta: document.getElementById('insightsMeta'),
   recommendationBox: document.getElementById('recommendationBox'),
@@ -73,6 +73,7 @@ const els = {
   chargeUpperSocOvercastSource: document.getElementById('chargeUpperSocOvercastSource'),
   disabledChargeUpperSoc: document.getElementById('disabledChargeUpperSoc'),
   disabledChargeUpperSocSource: document.getElementById('disabledChargeUpperSocSource'),
+  batterySettingsAutoApplyNote: document.getElementById('batterySettingsAutoApplyNote'),
   batterySettingsStatus: document.getElementById('batterySettingsStatus'),
   batterySettingsSaveButton: document.getElementById('batterySettingsSaveButton'),
   runAssessmentButton: document.getElementById('runAssessmentButton'),
@@ -84,7 +85,12 @@ const els = {
   gridDischargeLive: document.getElementById('gridDischargeLive'),
   gridDischargeLiveState: document.getElementById('gridDischargeLiveState'),
   gridDischargeSettingsStatus: document.getElementById('gridDischargeSettingsStatus'),
-  gridDischargeSettingsSaveButton: document.getElementById('gridDischargeSettingsSaveButton')
+  gridDischargeSettingsSaveButton: document.getElementById('gridDischargeSettingsSaveButton'),
+  settingsOptimizerSettingsForm: document.getElementById('settingsOptimizerSettingsForm'),
+  settingsOptimizerAutoApply: document.getElementById('settingsOptimizerAutoApply'),
+  settingsOptimizerAutoApplyState: document.getElementById('settingsOptimizerAutoApplyState'),
+  settingsOptimizerSettingsStatus: document.getElementById('settingsOptimizerSettingsStatus'),
+  settingsOptimizerSettingsSaveButton: document.getElementById('settingsOptimizerSettingsSaveButton')
 };
 
 let chart;
@@ -181,6 +187,7 @@ function showDashboard() {
   loadBatterySettings();
   loadGridDischargeSettings();
   loadSettingsOptimization();
+  loadSettingsOptimizerSettings();
 }
 
 els.loginForm.addEventListener('submit', async (event) => {
@@ -334,9 +341,16 @@ function setInsightsStatus(message) {
   els.insightsStatus.hidden = !message;
 }
 
-async function loadInsights() {
-  els.insightsSection.hidden = true;
+// The AI card is shared by three independent data sources (nightly insights,
+// battery accuracy, settings recommendation) — each unhides it as soon as it
+// has something to show, rather than any one of them owning the card's
+// visibility outright. Idempotent (setting hidden=false twice is harmless),
+// and once shown the card is never hidden again, same as the old behavior.
+function showAiCard() {
+  els.aiCardSection.hidden = false;
+}
 
+async function loadInsights() {
   try {
     const res = await authorizedFetch('insights');
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
@@ -377,7 +391,7 @@ function renderInsights(data) {
     els.aiNarrativeBox.hidden = true;
   }
 
-  els.insightsSection.hidden = false;
+  showAiCard();
 }
 
 // ─── Weather + battery charge decision ──────────────────────────────────────
@@ -470,10 +484,11 @@ function renderBatteryStatus(data) {
       ? `${data.previousAssessment.assessment} ${data.previousAssessment.usageNote}`
       : data.previousAssessment.assessment;
     els.previousAssessmentWidget.hidden = false;
+    showAiCard();
   }
 }
 
-// SettingsOptimizerFunction's latest weekly recommendation — a separate
+// SettingsOptimizerFunction's latest nightly recommendation — a separate
 // endpoint from battery-status, so a failure here just hides the widget
 // rather than displacing the (more important) weather/charge-decision ones.
 async function loadSettingsOptimization() {
@@ -501,10 +516,104 @@ async function loadSettingsOptimization() {
 
     els.settingsOptimizationReasoning.textContent = data.reasoning || '';
     els.settingsOptimizationWidget.hidden = false;
+    showAiCard();
   } catch {
     els.settingsOptimizationWidget.hidden = true;
   }
 }
+
+// ─── Settings optimizer settings ("Full automation" toggle) ────────────────
+// The system's one self-directing switch: on, SettingsOptimizerFunction's
+// nightly recommendation writes straight into the live control settings with
+// no manual step; off (default), it only ever recommends. Same toggle-pill +
+// confirm() + unsaved-changes pattern as the battery/grid-discharge control
+// mode toggles — arguably the most consequential of the three, since it's the
+// one that lets the AI change what the *other* two toggles' settings are.
+
+async function loadSettingsOptimizerSettings() {
+  try {
+    const res = await authorizedFetch('settings-optimizer-settings');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    els.settingsOptimizerAutoApply.checked = data.autoApply === true;
+    updateSettingsOptimizerAutoApplyLabel();
+    setSettingsOptimizerSettingsStatus('');
+  } catch (err) {
+    setSettingsOptimizerSettingsStatus(`Couldn't load settings: ${humanizeSettingsError(err.message, SETTINGS_OPTIMIZER_SETTINGS_FIELD_LABELS)}`);
+  }
+}
+
+function setSettingsOptimizerSettingsStatus(message) {
+  els.settingsOptimizerSettingsStatus.textContent = message;
+  els.settingsOptimizerSettingsStatus.hidden = !message;
+}
+
+function updateSettingsOptimizerAutoApplyLabel() {
+  const isAuto = els.settingsOptimizerAutoApply.checked;
+  els.settingsOptimizerAutoApplyState.textContent = isAuto ? 'FULLY AUTOMATED — AI writes live settings' : 'Recommend only';
+  els.settingsOptimizerAutoApplyState.classList.toggle('is-live', isAuto);
+  applyBatterySettingsLockState(isAuto);
+}
+
+// The only fields SettingsOptimizerFunction.applyRecommendations ever writes
+// into BATTERY_CONTROL_SETTINGS# — enabled/dryRun are dashboard-only and the
+// AI never touches them, so they stay editable regardless of automation state.
+const AI_MANAGED_BATTERY_SETTINGS_FIELDS = [
+  els.chargeUpperSocSunny,
+  els.chargeUpperSocPartlyCloudy,
+  els.chargeUpperSocOvercast,
+  els.disabledChargeUpperSoc
+];
+
+// When Full Automation is on, the nightly optimizer can silently overwrite
+// these same fields a human just edited — locking them removes that race
+// instead of leaving both writers pointed at the same row. Toggled from
+// updateSettingsOptimizerAutoApplyLabel, the single place that already
+// reacts to every load/change of the autoApply checkbox.
+function applyBatterySettingsLockState(isLocked) {
+  AI_MANAGED_BATTERY_SETTINGS_FIELDS.forEach(el => { el.disabled = isLocked; });
+  els.batterySettingsAutoApplyNote.hidden = !isLocked;
+}
+
+els.settingsOptimizerAutoApply.addEventListener('change', () => {
+  if (els.settingsOptimizerAutoApply.checked) {
+    const confirmed = window.confirm(
+      'Turn on full automation? Every night, the AI\'s settings recommendation will be written straight into the live battery/grid-discharge settings automatically — no manual review or save.'
+    );
+    if (!confirmed) {
+      els.settingsOptimizerAutoApply.checked = false;
+    }
+  }
+  updateSettingsOptimizerAutoApplyLabel();
+});
+
+els.settingsOptimizerSettingsForm.addEventListener('input', () => {
+  setSaveButtonDirty(els.settingsOptimizerSettingsSaveButton, true);
+});
+
+els.settingsOptimizerSettingsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setSettingsOptimizerSettingsStatus('Saving…');
+
+  try {
+    const res = await authorizedFetch('settings-optimizer-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoApply: els.settingsOptimizerAutoApply.checked })
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Request failed: ${res.status}`);
+    }
+
+    setSaveButtonDirty(els.settingsOptimizerSettingsSaveButton, false);
+    setSettingsOptimizerSettingsStatus('Saved — takes effect on tonight\'s assessment.');
+  } catch (err) {
+    setSettingsOptimizerSettingsStatus(`Couldn't save settings: ${humanizeSettingsError(err.message, SETTINGS_OPTIMIZER_SETTINGS_FIELD_LABELS)}`);
+  }
+});
 
 // ─── Settings error messages (translate API/validation errors to plain English) ──
 
@@ -523,6 +632,10 @@ const BATTERY_SETTINGS_FIELD_LABELS = {
 const GRID_DISCHARGE_SETTINGS_FIELD_LABELS = {
   enabled: 'Evening discharge enabled',
   dryRun: 'Control mode'
+};
+
+const SETTINGS_OPTIMIZER_SETTINGS_FIELD_LABELS = {
+  autoApply: 'Full automation'
 };
 
 // Translates DashboardApiFunction's raw validate*/error messages (field

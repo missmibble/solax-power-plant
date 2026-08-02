@@ -193,10 +193,10 @@
     "settingsOptimizerFunction": {
       "functionName": "SettingsOptimizerFunction",
       "cfResource": "PowerPlantSettingsOptimizerFunction",
-      "description": "Weekly AI assessment comparing hardcoded battery-charge and grid-discharge defaults against real usage; recommends (and optionally auto-applies) adjustments",
+      "description": "Nightly AI assessment comparing hardcoded battery-charge and grid-discharge defaults against real usage; recommends (and optionally auto-applies) adjustments",
       "assetPath": "lambda/SettingsOptimizerFunction",
       "timer": 60,
-      "schedule": "cron(0 12 ? * SUN *)"
+      "schedule": "cron(0 12 * * ? *)"
     }
   },
   "api": {
