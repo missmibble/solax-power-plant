@@ -81,7 +81,7 @@
     "historyLookbackDays": 14
   },
   "weather": {
-    "provider": "openweathermap"
+    "provider": "open-meteo"
   },
   "batteryControl": {
     "dryRun": true,
@@ -133,11 +133,6 @@
       "parameterName": "/powerplant/solax/client-secret",
       "cfResource": "PowerPlantSolaxClientSecretParam",
       "description": "SolaX Cloud OAuth2 Client Secret (developer.solaxcloud.com)"
-    },
-    "weatherApiKey": {
-      "parameterName": "/powerplant/weather/api-key",
-      "cfResource": "PowerPlantWeatherApiKeyParam",
-      "description": "OpenWeatherMap API key"
     }
   },
   "lambda": {

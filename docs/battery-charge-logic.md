@@ -10,13 +10,13 @@ Today, the household manually sets the inverter's grid-charge target (`chargeUpp
 
 Nightly at **21:30 Brisbane time** (`cron(30 11 * * ? *)` — 11:30 UTC; Queensland doesn't observe DST, so this is a fixed offset year-round, no seasonal drift). This is deliberately *before* the 00:00–06:00 overnight charge window starts, so whatever `chargeUpperSoc` it decides on is in place before grid-charging begins that night — and deliberately *after* `GridDischargeFunction`'s 21:00 exit phase (see [docs/grid-discharge-logic.md](grid-discharge-logic.md)), not the original 20:00, which fell inside that function's 17:00–21:00 discharge window and risked the two Lambdas contending for control of the same inverter.
 
-"Tomorrow" is computed as the calendar date following the current one, in `Australia/Brisbane` local time, at the moment the function runs (~21:30) — i.e., the day that starts right after tonight's charge window ends. That same date is stored on the status record as `appliesToDate` (via `tariff.localDateString`, the same helper `fetchTomorrowForecastSlots` uses to filter forecast slots) and shown on the dashboard's "Charge decision" widget as "Applies from &lt;date&gt;" — computed identically regardless of whether the run was a real forecast decision or the disabled-toggle default, since both take effect at the same overnight window.
+"Tomorrow" is computed as the calendar date following the current one, in `Australia/Brisbane` local time, at the moment the function runs (~21:30) — i.e., the day that starts right after tonight's charge window ends. That same date is stored on the status record as `appliesToDate` (via `tariff.localDateString`, the same helper `fetchTomorrowForecast` uses to request that exact local date from Open-Meteo) and shown on the dashboard's "Charge decision" widget as "Applies from &lt;date&gt;" — computed identically regardless of whether the run was a real forecast decision or the disabled-toggle default, since both take effect at the same overnight window.
 
 ## Data sources
 
-**Weather**: OpenWeatherMap's free 5-day/3-hour forecast endpoint —
-`https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid=...&units=metric`
-(`lat`/`lon` are the site's real coordinates, from `config.location` — gitignored local config only, never the public template, same sensitivity tier as the inverter serial). This returns 3-hour forecast slots; the function filters to just the 8 slots (00:00–24:00, 3-hourly) that fall on tomorrow's local date.
+**Weather**: [Open-Meteo](https://open-meteo.com)'s free forecast API —
+`https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation_probability,precipitation,cloud_cover&timezone={tz}&start_date={tomorrow}&end_date={tomorrow}`
+(`lat`/`lon` are the site's real coordinates, from `config.location` — gitignored local config only, never the public template, same sensitivity tier as the inverter serial). No API key required. Unlike a UTC-referenced 3-hour grid, Open-Meteo's `timezone`/`start_date`/`end_date` params return the 24 hourly slots for tomorrow's *local* calendar day directly — no client-side date filtering needed. All of this is isolated behind `powerplant-shared`'s `fetchTomorrowForecast` (`lambda/Utilities/weather-client.js`), which returns a normalized `{timestampSeconds, tempC, precipitationProbability, cloudCoverPercent, isRainy}` shape rather than the raw provider response — `classifyForecast` below reads only that normalized shape, so a future provider swap only ever touches `weather-client.js`.
 
 **Inverter baseline**: `config.batteryControl` — the *current* real settings from the SolaX app (see [CLAUDE.md](../CLAUDE.md) for why these can't be read back from the API and must be kept here instead):
 
@@ -33,11 +33,11 @@ Nightly at **21:30 Brisbane time** (`cron(30 11 * * ? *)` — 11:30 UTC; Queensl
 
 ## The classification (`classifyForecast`)
 
-Three signals are computed across tomorrow's 8 forecast slots:
+Three signals are computed across tomorrow's 24 hourly slots (formerly 8 3-hour slots under OpenWeatherMap — Open-Meteo's hourly resolution just means more, finer-grained slots feeding the same max/average logic):
 
-- **`hasRainCondition`** — does any slot report `weather.main` of `Rain`, `Thunderstorm`, `Drizzle`, or `Snow`?
-- **`maxPop`** — the highest "probability of precipitation" (0–1) across all 8 slots.
-- **`avgClouds`** — the average cloud-cover percentage across all 8 slots.
+- **`hasRainCondition`** — does any slot's `isRainy` flag come back true? (`isRainy` is derived in `weather-client.js` from Open-Meteo's forecast `precipitation` amount — any measurable rainfall (mm) in that hour — rather than a categorical condition string, since Open-Meteo doesn't provide one of those for the hourly forecast fields this app requests.)
+- **`maxPop`** — the highest `precipitationProbability` (0–1 fraction) across all slots.
+- **`avgClouds`** — the average `cloudCoverPercent` across all slots.
 
 Decision, in order:
 
@@ -70,7 +70,7 @@ ELSE:
 | 3 | Clouds building in the afternoon, no rain tagged | false | 0.15 | 45% | **partly-cloudy** (ambiguous — `avgClouds` > 30%, but below the 70% overcast threshold) | **70%** |
 | 4 | Mostly clear, but a 35% pop slot around 3pm, no "Rain" condition | false | 0.35 | 25% | **partly-cloudy** (ambiguous — `maxPop` 0.35 is < 0.4 but not < 0.2) | **70%** |
 | 5 | Thick cloud cover all day, but no rain ever forecast | false | 0.1 | 85% | **overcast** (`avgClouds` ≥ 70%) | **100%** |
-| 6 | OpenWeatherMap returns no slots for tomorrow (API hiccup, coverage gap) | — | — | — | **overcast** (no data — a true blind spot, not just ambiguous) | **100%** |
+| 6 | Open-Meteo returns no hourly data for tomorrow (API hiccup, coverage gap) | — | — | — | **overcast** (no data — a true blind spot, not just ambiguous) | **100%** |
 | 7 | A few scattered clouds, clearing by afternoon | false | 0.05 | 20% | **sunny** (both thresholds clearly pass) | **40%** |
 
 Examples 3 and 4 previously defaulted to `overcast`/100% — they're the exact cases the `partly-cloudy` tier was added for. Example 4 is still the one most worth double-checking against your own judgement — a 35% chance of an isolated afternoon shower with otherwise clear skies is a genuinely borderline case. If 70% still feels too conservative (or not conservative enough) once you've watched a few weeks of dry-run output against example-4-style days, the fix is adjusting `chargeUpperSocPartlyCloudy` from the dashboard, not a threshold rewrite.

@@ -3,5 +3,6 @@
 module.exports = {
     ...require('./logger'),
     ...require('./solax-client'),
-    ...require('./tariff')
+    ...require('./tariff'),
+    ...require('./weather-client')
 };

@@ -165,7 +165,7 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
-    test('BatteryControlFunction role can read SSM parameters (SolaX creds + weather API key)', () => {
+    test('BatteryControlFunction role can read SSM parameters (SolaX creds only — Open-Meteo needs no API key)', () => {
         const policies = template.findResources('AWS::IAM::Policy', {
             Properties: { PolicyName: Match.stringLikeRegexp('BatteryControlFunction') }
         });
@@ -175,7 +175,7 @@ describe('LambdaFunctionsStack', () => {
         );
 
         expect(ssmStatement).toBeDefined();
-        expect(ssmStatement.Resource).toHaveLength(3);
+        expect(ssmStatement.Resource).toHaveLength(2);
     });
 
     test('BatteryControlFunction role can publish to both SNS topics', () => {

@@ -47,23 +47,6 @@ function loadSolaxCredentials() {
 
 const solaxCredentials = loadSolaxCredentials();
 
-// ─── Load OpenWeatherMap API key (one-time SSM seed) ──────────────────────────
-// weather-api-key.txt is gitignored, same pattern as solax-application-creds.txt.
-
-function loadWeatherApiKey() {
-    const keyPath = path.join(__dirname, '..', 'weather-api-key.txt');
-    if (!fs.existsSync(keyPath)) {
-        return null;
-    }
-
-    const content = fs.readFileSync(keyPath, 'utf8');
-    const apiKey = content.match(/^API Key:\s*(.+)$/m)?.[1]?.trim();
-
-    return apiKey || null;
-}
-
-const weatherApiKey = loadWeatherApiKey();
-
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 const app = new cdk.App();
@@ -81,7 +64,6 @@ const infraStack = new InfrastructureStack(app, 'PowerPlantInfrastructureStack',
     env,
     config,
     solaxCredentials,
-    weatherApiKey,
     description: 'powerplant: Core infrastructure — DynamoDB, S3, SNS, SSM'
 });
 

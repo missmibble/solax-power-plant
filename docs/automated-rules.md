@@ -47,7 +47,7 @@ When SOC data is available for the peak window, further distinguishes "already d
 
 | Rule | Value |
 |---|---|
-| Forecast classification | Tomorrow's OpenWeatherMap slots → `sunny`, `partly-cloudy`, or `overcast` |
+| Forecast classification | Tomorrow's Open-Meteo hourly slots → `sunny`, `partly-cloudy`, or `overcast` |
 | Charge target if sunny **[editable]** | `chargeUpperSocSunny` = **40%** |
 | Charge target if partly cloudy **[editable]** | `chargeUpperSocPartlyCloudy` = **70%** — the ambiguous-forecast middle ground, added so an uncertain-but-not-bad forecast doesn't default to a full grid charge it usually doesn't need |
 | Charge target if overcast **[editable]** | `chargeUpperSocOvercast` = **100%** |

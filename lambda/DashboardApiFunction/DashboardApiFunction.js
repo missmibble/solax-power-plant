@@ -3,14 +3,10 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, QueryCommand, GetCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
-const { SSMClient, GetParameterCommand } = require('@aws-sdk/client-ssm');
-const { logInfo, logError, importCostForWindow, exportCredit, startOfLocalDay } = require('powerplant-shared');
+const { logInfo, logError, importCostForWindow, exportCredit, startOfLocalDay, fetchCurrentConditions } = require('powerplant-shared');
 
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION });
-const ssmClient = new SSMClient({ region: process.env.AWS_REGION });
-
-let cachedWeatherApiKey = null; // reused across warm invocations, same pattern as BatteryControlFunction
 
 const RANGE_SECONDS = {
     day: 24 * 60 * 60,
@@ -206,44 +202,17 @@ async function handleBatteryStatus() {
     }
 }
 
-async function loadWeatherApiKey() {
-    if (cachedWeatherApiKey) return cachedWeatherApiKey;
-
-    const result = await ssmClient.send(new GetParameterCommand({
-        Name: process.env.WEATHER_API_KEY_PARAM,
-        WithDecryption: true
-    }));
-
-    cachedWeatherApiKey = result.Parameter.Value;
-    return cachedWeatherApiKey;
-}
-
-// OpenWeatherMap's current-conditions endpoint (distinct from the 5-day/3-hour
-// forecast BatteryControlFunction uses for tomorrow) — called live on every
-// request rather than cached, since "now" is only useful if it's actually now.
-// Same graceful-degradation pattern as everything else additive in this app:
-// not configured, an API error, or an unparsable response all just mean the
-// widget shows the forecast decision without a current-conditions line, never
-// a failed request.
+// Delegates the actual API call to powerplant-shared's fetchCurrentConditions
+// (weather-client.js) — called live on every request rather than cached,
+// since "now" is only useful if it's actually now. Same graceful-degradation
+// pattern as everything else additive in this app: not configured, an API
+// error, or an unparsable response all just mean the widget shows the
+// forecast decision without a current-conditions line, never a failed request.
 async function fetchCurrentWeather() {
-    if (!process.env.WEATHER_API_KEY_PARAM || !process.env.WEATHER_LAT || !process.env.WEATHER_LON) return null;
+    if (!process.env.WEATHER_LAT || !process.env.WEATHER_LON) return null;
 
     try {
-        const apiKey = await loadWeatherApiKey();
-        const url = new URL('https://api.openweathermap.org/data/2.5/weather');
-        url.searchParams.set('lat', process.env.WEATHER_LAT);
-        url.searchParams.set('lon', process.env.WEATHER_LON);
-        url.searchParams.set('appid', apiKey);
-        url.searchParams.set('units', 'metric');
-
-        const res = await fetch(url);
-        const payload = await res.json();
-        if (String(payload.cod) !== '200') return null;
-
-        return {
-            tempC: Math.round(payload.main?.temp),
-            description: payload.weather?.[0]?.description || null
-        };
+        return await fetchCurrentConditions(process.env.WEATHER_LAT, process.env.WEATHER_LON);
     } catch (err) {
         logError('Current weather fetch failed', { error: err.message });
         return null;

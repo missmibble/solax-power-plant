@@ -42,6 +42,7 @@ jest.mock('@aws-sdk/client-bedrock-runtime', () => ({
 
 jest.mock('powerplant-shared', () => {
     const { localDateString, findImportRateWindow } = require('../lambda/Utilities/tariff');
+    const { fetchTomorrowForecast } = require('../lambda/Utilities/weather-client');
     return {
         logInfo: jest.fn(),
         logError: jest.fn(),
@@ -49,7 +50,8 @@ jest.mock('powerplant-shared', () => {
         getAccessToken: (...args) => mockGetAccessToken(...args),
         setInverterSelfUseMode: (...args) => mockSetInverterSelfUseMode(...args),
         localDateString,
-        findImportRateWindow
+        findImportRateWindow,
+        fetchTomorrowForecast
     };
 }, { virtual: true });
 
@@ -71,13 +73,32 @@ const BASELINE_CONFIG = {
     enableTimePeriod2: 0
 };
 
-function tomorrowSlot(overrides) {
-    const tomorrowSeconds = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+// Raw Open-Meteo hourly-forecast response shape, for global.fetch mocks — a
+// single hour is enough for classifyForecast's max/avg-across-slots logic
+// with n=1. powerplant-shared's real fetchTomorrowForecast (weather-client.js)
+// parses/normalizes this.
+function openMeteoHourlyResponse(overrides) {
     return {
-        dt: tomorrowSeconds,
-        pop: 0,
-        clouds: { all: 0 },
-        weather: [{ main: 'Clear' }],
+        hourly: {
+            time: ['2026-01-01T12:00'],
+            temperature_2m: [20],
+            precipitation_probability: [0],
+            precipitation: [0],
+            cloud_cover: [0],
+            ...overrides
+        }
+    };
+}
+
+// The normalized shape fetchTomorrowForecast returns — what classifyForecast
+// actually consumes, so its own unit tests exercise that boundary rather than
+// the raw provider shape.
+function normalizedSlot(overrides) {
+    return {
+        timestampSeconds: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
+        precipitationProbability: 0,
+        cloudCoverPercent: 0,
+        isRainy: false,
         ...overrides
     };
 }
@@ -112,7 +133,6 @@ describe('BatteryControlFunction', () => {
 
         process.env.WEATHER_LAT = '-33.0000';
         process.env.WEATHER_LON = '151.0000';
-        process.env.WEATHER_API_KEY_PARAM = '/powerplant/weather/api-key';
         process.env.SOLAX_CLIENT_ID_PARAM = '/powerplant/solax/client-id';
         process.env.SOLAX_CLIENT_SECRET_PARAM = '/powerplant/solax/client-secret';
         process.env.SOLAX_BASE_URL = 'https://openapi-eu.solaxcloud.com';
@@ -137,27 +157,27 @@ describe('BatteryControlFunction', () => {
 
     describe('classifyForecast', () => {
         test('classifies a clear, dry forecast as sunny', () => {
-            const slots = [tomorrowSlot(), tomorrowSlot({ clouds: { all: 10 } })];
+            const slots = [normalizedSlot(), normalizedSlot({ cloudCoverPercent: 10 })];
             expect(classifyForecast(slots).classification).toBe('sunny');
         });
 
         test('classifies a forecast with a rain condition as overcast', () => {
-            const slots = [tomorrowSlot({ weather: [{ main: 'Rain' }] })];
+            const slots = [normalizedSlot({ isRainy: true })];
             expect(classifyForecast(slots).classification).toBe('overcast');
         });
 
         test('classifies a high precipitation probability as overcast even without a rain condition yet', () => {
-            const slots = [tomorrowSlot({ pop: 0.6 })];
+            const slots = [normalizedSlot({ precipitationProbability: 0.6 })];
             expect(classifyForecast(slots).classification).toBe('overcast');
         });
 
         test('classifies heavy average cloud cover as overcast', () => {
-            const slots = [tomorrowSlot({ clouds: { all: 90 } }), tomorrowSlot({ clouds: { all: 85 } })];
+            const slots = [normalizedSlot({ cloudCoverPercent: 90 }), normalizedSlot({ cloudCoverPercent: 85 })];
             expect(classifyForecast(slots).classification).toBe('overcast');
         });
 
         test('classifies an ambiguous/partly-cloudy forecast as its own tier rather than defaulting to overcast', () => {
-            const slots = [tomorrowSlot({ clouds: { all: 50 }, pop: 0.25 })];
+            const slots = [normalizedSlot({ cloudCoverPercent: 50, precipitationProbability: 0.25 })];
             expect(classifyForecast(slots).classification).toBe('partly-cloudy');
         });
 
@@ -360,9 +380,8 @@ describe('BatteryControlFunction', () => {
 
     describe('handler (dry run)', () => {
         test('publishes a DRY RUN message, stores a status record, and never calls the control endpoint', async () => {
-            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
             global.fetch.mockResolvedValue({
-                json: async () => ({ cod: '200', list: [tomorrowSlot({ weather: [{ main: 'Rain' }] })] })
+                json: async () => openMeteoHourlyResponse({ precipitation: [1] })
             });
 
             const result = await handler();
@@ -390,9 +409,8 @@ describe('BatteryControlFunction', () => {
         });
 
         test('uses the partly-cloudy charge target for an ambiguous forecast, rather than defaulting to the overcast one', async () => {
-            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
             global.fetch.mockResolvedValue({
-                json: async () => ({ cod: '200', list: [tomorrowSlot({ clouds: { all: 50 }, pop: 0.25 })] })
+                json: async () => openMeteoHourlyResponse({ cloud_cover: [50], precipitation_probability: [25] })
             });
 
             await handler();
@@ -413,7 +431,7 @@ describe('BatteryControlFunction', () => {
 
             mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
             global.fetch.mockResolvedValue({
-                json: async () => ({ cod: '200', list: [tomorrowSlot()] }) // clear -> sunny -> 40%
+                json: async () => openMeteoHourlyResponse({}) // clear -> sunny -> 40%
             });
             mockGetAccessToken.mockResolvedValue('access-token');
             mockSetInverterSelfUseMode.mockResolvedValue({ [process.env.SOLAX_INVERTER_SN]: { status: 0 } });
@@ -448,9 +466,8 @@ describe('BatteryControlFunction', () => {
             });
             ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
 
-            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
             global.fetch.mockResolvedValue({
-                json: async () => ({ cod: '200', list: [tomorrowSlot()] }) // clear -> sunny
+                json: async () => openMeteoHourlyResponse({}) // clear -> sunny
             });
 
             await handler();
@@ -470,7 +487,7 @@ describe('BatteryControlFunction', () => {
 
             mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
             global.fetch.mockResolvedValue({
-                json: async () => ({ cod: '200', list: [tomorrowSlot()] }) // clear -> sunny -> 40%
+                json: async () => openMeteoHourlyResponse({}) // clear -> sunny -> 40%
             });
             mockGetAccessToken.mockResolvedValue('access-token');
             mockSetInverterSelfUseMode.mockResolvedValue({ [process.env.SOLAX_INVERTER_SN]: { status: 0 } });
@@ -566,8 +583,7 @@ describe('BatteryControlFunction', () => {
             });
             ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
 
-            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
-            global.fetch.mockResolvedValue({ json: async () => ({ cod: '200', list: [tomorrowSlot()] }) });
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
             mockBedrockSend.mockResolvedValue(bedrockTextResponse(
                 '{"accurate": false, "assessment": "Ran flat before solar.", "usageShouldInfluence": true, "usageNote": "Low SOC overnight."}'
             ));
@@ -584,8 +600,7 @@ describe('BatteryControlFunction', () => {
         });
 
         test('omits previousAssessment when no model is configured', async () => {
-            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
-            global.fetch.mockResolvedValue({ json: async () => ({ cod: '200', list: [tomorrowSlot()] }) });
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
 
             await handler();
 
@@ -597,10 +612,9 @@ describe('BatteryControlFunction', () => {
 
     describe('handler (failure)', () => {
         test('publishes an alert and rethrows when the weather lookup fails', async () => {
-            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'weather-key' } });
-            global.fetch.mockResolvedValue({ json: async () => ({ cod: '401', message: 'invalid API key' }) });
+            global.fetch.mockResolvedValue({ json: async () => ({ error: true, reason: 'Internal Server Error' }) });
 
-            await expect(handler()).rejects.toThrow(/invalid API key/);
+            await expect(handler()).rejects.toThrow(/Internal Server Error/);
 
             const publishCall = mockSnsSend.mock.calls[0][0];
             expect(publishCall.input.TopicArn).toBe(process.env.ALERTS_TOPIC_ARN);

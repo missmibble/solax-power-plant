@@ -433,7 +433,7 @@ function setBatteryStatusMessage(message) {
   els.batteryStatusStatus.hidden = !message;
 }
 
-// currentWeather is a live OpenWeatherMap lookup (DashboardApiFunction.fetchCurrentWeather),
+// currentWeather is a live Open-Meteo lookup (DashboardApiFunction.fetchCurrentWeather),
 // independent of whether BatteryControlFunction has ever run — falls back to
 // a plain unavailable message (or the loadingMessage while a request is in
 // flight) rather than hiding the widget, same "always present" reasoning as

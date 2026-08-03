@@ -68,7 +68,7 @@ InfrastructureStack   →   LambdaFunctionsStack           →   DashboardStack
   SNS (alerts topic)        DashboardApiFunction                  CloudFront distribution
   SNS (reports topic)       AlertFunction                           default behavior → S3 (dashboard assets)
   SSM (SolaX creds)         ReportFunction                          readings/insights/battery-status → API Gateway
-  SSM (weather API key)     BatteryControlFunction                    (API key + Cognito token both required)
+                            BatteryControlFunction                   (API key + Cognito token both required)
   Cognito User Pool         Cognito UserPoolClient + Authorizer     config.json (User Pool Client ID + region)
                             API Gateway (readings/insights/battery-status)
 ```
@@ -142,11 +142,7 @@ The assessment isn't only once/night: `config.lambda.reportFunction.refreshSched
 
 ### Battery charge control (weather-driven, dry-run by default)
 
-**Read [docs/battery-charge-logic.md](docs/battery-charge-logic.md) before touching `dryRun`.** `BatteryControlFunction` checks tomorrow's OpenWeatherMap forecast nightly and decides the inverter's `chargeUpperSoc` (40% on a sunny forecast, 100% on an overcast/rainy one, defaulting to 100% whenever the signal is ambiguous). It works like the SolaX credentials: sign up for a free [OpenWeatherMap](https://openweathermap.org/api) account, then create `weather-api-key.txt` at the repo root (gitignored) with one line:
-
-```
-API Key: <your key>
-```
+**Read [docs/battery-charge-logic.md](docs/battery-charge-logic.md) before touching `dryRun`.** `BatteryControlFunction` checks tomorrow's [Open-Meteo](https://open-meteo.com) forecast nightly and decides the inverter's `chargeUpperSoc` (40% on a sunny forecast, 100% on an overcast/rainy one, defaulting to 100% whenever the signal is ambiguous). Unlike the SolaX credentials, this needs no API key or SSM setup at all — Open-Meteo's forecast API is free and keyless — so the only thing to configure is location.
 
 `config.location.lat`/`lon` need your site's real coordinates (public template defaults to `0`/`0` — obviously a placeholder, off the coast of West Africa) — this is the same `location` block that supplies `timezone` for the tariff windows above, since both describe the one physical site being monitored. `config.batteryControl` needs the household's *actual current* self-use-mode settings from the SolaX app (`minSoc`, `chargeFromGridEnable`, the charge/discharge time windows, `enableTimePeriod2`) — there's no API to read these back, so this app treats the config as the source of truth and resends it in full every time it runs, varying only `chargeUpperSoc`. Getting this baseline wrong risks overwriting your actual schedule, not just the charge target — see the doc for why.
 

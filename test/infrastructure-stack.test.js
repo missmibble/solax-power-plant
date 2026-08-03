@@ -78,17 +78,6 @@ describe('InfrastructureStack', () => {
         Template.fromStack(stack).resourceCountIs('Custom::AWS', 0);
     });
 
-    test('also creates the weather API key parameter when one is provided', () => {
-        const app = new cdk.App();
-        const stack = new InfrastructureStack(app, 'TestInfrastructureStackWeather', {
-            env: { account: '123456789012', region: 'ap-southeast-2' },
-            config,
-            solaxCredentials: { clientId: 'test-client-id', clientSecret: 'test-client-secret' },
-            weatherApiKey: 'test-weather-key'
-        });
-        Template.fromStack(stack).resourceCountIs('Custom::AWS', 3);
-    });
-
     // ─── Cognito ──────────────────────────────────────────────────────────────
 
     test('creates a Cognito User Pool with self-signup disabled', () => {

@@ -12,7 +12,8 @@ const {
     getAccessToken,
     setInverterSelfUseMode,
     localDateString,
-    findImportRateWindow
+    findImportRateWindow,
+    fetchTomorrowForecast
 } = require('powerplant-shared');
 
 const ssmClient = new SSMClient({ region: process.env.AWS_REGION });
@@ -49,7 +50,6 @@ account for household load, independent of tomorrow's forecast.
 usageShouldInfluence is false.`;
 
 let cachedCredentials = null; // reused across warm invocations, same pattern as PollerFunction
-let cachedWeatherApiKey = null;
 
 async function loadSolaxCredentials() {
     if (cachedCredentials) return cachedCredentials;
@@ -73,37 +73,6 @@ async function loadSolaxCredentials() {
     return cachedCredentials;
 }
 
-async function loadWeatherApiKey() {
-    if (cachedWeatherApiKey) return cachedWeatherApiKey;
-
-    const result = await ssmClient.send(new GetParameterCommand({
-        Name: process.env.WEATHER_API_KEY_PARAM,
-        WithDecryption: true
-    }));
-
-    cachedWeatherApiKey = result.Parameter.Value;
-    return cachedWeatherApiKey;
-}
-
-// OpenWeatherMap's free 5-day/3-hour forecast endpoint (no One Call subscription
-// needed) — filtered down to the 3-hour slots that fall on tomorrow's local date.
-async function fetchTomorrowForecastSlots(lat, lon, apiKey, timezone) {
-    const url = new URL('https://api.openweathermap.org/data/2.5/forecast');
-    url.searchParams.set('lat', lat);
-    url.searchParams.set('lon', lon);
-    url.searchParams.set('appid', apiKey);
-    url.searchParams.set('units', 'metric');
-
-    const response = await fetch(url);
-    const payload = await response.json();
-    if (String(payload.cod) !== '200') {
-        throw new Error(`OpenWeatherMap error: cod=${payload.cod} message=${payload.message}`);
-    }
-
-    const tomorrow = localDateString(Math.floor(Date.now() / 1000) + 24 * 60 * 60, timezone);
-    return (payload.list || []).filter(slot => localDateString(slot.dt, timezone) === tomorrow);
-}
-
 // Classifies tomorrow's forecast slots into a charge target. Three tiers:
 // clearly good (sunny), clearly bad (overcast — rain condition, high rain
 // chance, or heavy cloud), and everything in between (partly-cloudy). The
@@ -118,14 +87,18 @@ async function fetchTomorrowForecastSlots(lat, lon, apiKey, timezone) {
 // to the conservative extreme. No forecast data at all still defaults to
 // overcast — that's a true blind spot, not just an uncertain-but-present
 // signal, so the safe-failure-mode reasoning still applies there.
+// slots are the normalized shape from powerplant-shared's fetchTomorrowForecast
+// (weather-client.js) — {timestampSeconds, precipitationProbability, cloudCoverPercent,
+// isRainy} — never the raw provider response, so this logic doesn't change
+// if the weather provider ever does.
 function classifyForecast(slots) {
     if (!slots.length) {
         return { classification: 'overcast', reasoning: 'No forecast data for tomorrow — defaulting to safe/conservative.' };
     }
 
-    const maxPop = Math.max(...slots.map(s => s.pop || 0));
-    const avgClouds = slots.reduce((sum, s) => sum + (s.clouds?.all || 0), 0) / slots.length;
-    const hasRainCondition = slots.some(s => ['Rain', 'Thunderstorm', 'Drizzle', 'Snow'].includes(s.weather?.[0]?.main));
+    const maxPop = Math.max(...slots.map(s => s.precipitationProbability || 0));
+    const avgClouds = slots.reduce((sum, s) => sum + (s.cloudCoverPercent || 0), 0) / slots.length;
+    const hasRainCondition = slots.some(s => s.isRainy);
 
     if (hasRainCondition || maxPop >= 0.4 || avgClouds >= 70) {
         return {
@@ -438,9 +411,8 @@ exports.handler = async () => {
             reasoning = `Automation disabled via dashboard settings — holding chargeUpperSoc at the configured default (${effective.disabledChargeUpperSoc}%) instead of leaving the last automated decision in place.`;
             chargeUpperSoc = effective.disabledChargeUpperSoc;
         } else {
-            const weatherApiKey = await loadWeatherApiKey();
-            const slots = await fetchTomorrowForecastSlots(
-                process.env.WEATHER_LAT, process.env.WEATHER_LON, weatherApiKey, tariff.timezone
+            const slots = await fetchTomorrowForecast(
+                process.env.WEATHER_LAT, process.env.WEATHER_LON, tariff.timezone
             );
             ({ classification, reasoning } = classifyForecast(slots));
             chargeUpperSoc = chargeTargetForClassification(classification, effective);
