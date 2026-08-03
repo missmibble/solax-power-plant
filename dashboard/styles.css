@@ -209,15 +209,18 @@ main {
   margin: 0.5rem 0 0;
 }
 
+.pv-status-panel,
 .battery-status-panel {
   margin-top: 1.5rem;
 }
 
+.pv-status-panel h2,
 .battery-status-panel h2 {
   font-size: 1.1rem;
   margin: 0 0 0.75rem;
 }
 
+.pv-status-panel .cards,
 .battery-status-panel .cards {
   margin-bottom: 0;
 }

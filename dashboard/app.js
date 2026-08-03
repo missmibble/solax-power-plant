@@ -28,6 +28,11 @@ const els = {
   exportKwh: document.getElementById('exportKwh'),
   exportCredit: document.getElementById('exportCredit'),
   netCost: document.getElementById('netCost'),
+  pvStatusPanelSection: document.getElementById('pvStatusPanelSection'),
+  livePvPower: document.getElementById('livePvPower'),
+  livePvStatus: document.getElementById('livePvStatus'),
+  livePvTodayYield: document.getElementById('livePvTodayYield'),
+  liveInverterTemperature: document.getElementById('liveInverterTemperature'),
   batteryStatusPanelSection: document.getElementById('batteryStatusPanelSection'),
   liveBatterySOC: document.getElementById('liveBatterySOC'),
   liveBatteryStatus: document.getElementById('liveBatteryStatus'),
@@ -222,6 +227,7 @@ async function loadReadings(range) {
   setStatus('Loading…');
   els.cards.hidden = true;
   els.chartWrap.hidden = true;
+  els.pvStatusPanelSection.hidden = true;
   els.batteryStatusPanelSection.hidden = true;
 
   try {
@@ -252,6 +258,7 @@ function render(data) {
   els.exportCredit.textContent = `${data.exportCredit} ${currency} credit`;
   els.netCost.textContent = `${data.netCost} ${currency}`;
 
+  renderLivePvStatus(data);
   renderLiveBatteryStatus(data);
 
   els.cards.hidden = false;
@@ -259,6 +266,31 @@ function render(data) {
 
   renderChart(data);
   els.chartWrap.hidden = false;
+}
+
+// Same pattern as renderLiveBatteryStatus below — always the latest poll,
+// hidden until PollerFunction has stored a reading with MPPTTotalInputPower
+// (see DashboardApiFunction.pvSummary's backward-compat gate).
+function renderLivePvStatus(data) {
+  if (typeof data.currentPvPowerW !== 'number') {
+    els.pvStatusPanelSection.hidden = true;
+    return;
+  }
+
+  els.livePvPower.textContent = `${(data.currentPvPowerW / 1000).toFixed(2)} kW`;
+  els.livePvStatus.textContent = formatPvStatusLabel(data.currentPvStatus);
+  els.livePvTodayYield.textContent =
+    typeof data.todayPvYieldKwh === 'number' ? `${data.todayPvYieldKwh} kWh` : '–';
+  els.liveInverterTemperature.textContent =
+    typeof data.inverterTemperatureC === 'number' ? `${data.inverterTemperatureC}°C` : '–';
+
+  els.pvStatusPanelSection.hidden = false;
+}
+
+function formatPvStatusLabel(status) {
+  if (status === 'producing') return '☀️ Producing';
+  if (status === 'fault') return '⚠️ Fault';
+  return '⏸️ Idle';
 }
 
 // The instantaneous fields (SOC/status/power/health/cycles/remaining) on the

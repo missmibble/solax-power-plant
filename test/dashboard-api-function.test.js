@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {
     aggregateReadings,
+    classifyPvStatus,
     formatInsightsResponse,
     formatBatteryStatusResponse,
     formatBatterySettingsResponse,
@@ -174,6 +175,43 @@ describe('DashboardApiFunction aggregateReadings', () => {
         expect(rollup.batteryTemperatureC).toBe(23.1);
         expect(rollup.batteryCycleTimes).toBe(42);
         expect(rollup.batteryRemainingsKwh).toBe(6.4);
+    });
+
+    test('omits PV live fields entirely when the latest reading predates MPPTTotalInputPower', () => {
+        const rollup = aggregateReadings(readings, config.tariff);
+
+        expect(rollup.currentPvPowerW).toBeUndefined();
+        expect(rollup.currentPvStatus).toBeUndefined();
+        expect(rollup.todayPvYieldKwh).toBeUndefined();
+        expect(rollup.inverterTemperatureC).toBeUndefined();
+    });
+
+    test('includes live PV power, status, today\'s yield, and inverter temperature from the latest reading', () => {
+        const readingsWithPv = [
+            readings[0],
+            readings[1],
+            { ...readings[2], MPPTTotalInputPower: 2410, dailyYield: 14.6, deviceStatus: 102, inverterTemperature: 38.5 }
+        ];
+
+        const rollup = aggregateReadings(readingsWithPv, config.tariff);
+
+        expect(rollup.currentPvPowerW).toBe(2410);
+        expect(rollup.currentPvStatus).toBe('producing');
+        expect(rollup.todayPvYieldKwh).toBe(14.6);
+        expect(rollup.inverterTemperatureC).toBe(38.5);
+    });
+});
+
+describe('DashboardApiFunction classifyPvStatus', () => {
+    test.each([
+        [2410, 102, 'producing'],
+        [0, 102, 'idle'],
+        [undefined, 102, 'idle'],
+        [2410, 103, 'fault'],
+        [2410, 104, 'fault'],
+        [0, 104, 'fault']
+    ])('classifies powerW=%p deviceStatus=%p as %p', (powerW, deviceStatus, expected) => {
+        expect(classifyPvStatus(deviceStatus, powerW)).toBe(expected);
     });
 });
 

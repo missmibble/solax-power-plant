@@ -218,4 +218,27 @@ describe('PollerFunction handler', () => {
         expect(putCall.input.Item.batteryTemperature).toBe(22.0);
         expect(putCall.input.Item.batterySOH).toBeUndefined();
     });
+
+    // Feeds the dashboard's Current PV Status panel — live instantaneous power
+    // and inverter temperature, distinct from the daily/total yield counters.
+    test('maps the inverter reading\'s MPPTTotalInputPower and inverterTemperature fields', async () => {
+        mockGetDeviceRealtimeData.mockImplementation((baseUrl, token, params) => {
+            if (params.deviceType === 1) {
+                return Promise.resolve([{
+                    deviceSn: 'H34ABCDEFG5001', dataTime: '2026-07-31T04:45:00.000+00:00',
+                    deviceStatus: 102, dailyYield: 22.7, totalYield: 444.9, dailyACOutput: 22.2,
+                    totalACOutput: 520.6, gridPower: 0, todayImportEnergy: 28.8, totalImportEnergy: 403.94,
+                    todayExportEnergy: 0.1, totalExportEnergy: 80.7, totalActivePower: null,
+                    MPPTTotalInputPower: 2410, inverterTemperature: 38.5
+                }]);
+            }
+            return Promise.resolve(null);
+        });
+
+        await handler();
+
+        const putCall = findPutCall();
+        expect(putCall.input.Item.MPPTTotalInputPower).toBe(2410);
+        expect(putCall.input.Item.inverterTemperature).toBe(38.5);
+    });
 });

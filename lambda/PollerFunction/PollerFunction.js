@@ -125,6 +125,8 @@ exports.handler = async () => {
                 todayExportEnergy: inverterReading.todayExportEnergy,
                 totalExportEnergy: inverterReading.totalExportEnergy,
                 totalActivePower: inverterReading.totalActivePower,
+                MPPTTotalInputPower: inverterReading.MPPTTotalInputPower,
+                inverterTemperature: inverterReading.inverterTemperature,
                 ...(batteryReading && {
                     batteryDeviceSn: batteryReading.deviceSn,
                     batteryDeviceStatus: batteryReading.deviceStatus,

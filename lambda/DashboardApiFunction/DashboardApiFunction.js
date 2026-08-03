@@ -476,8 +476,39 @@ function aggregateReadings(readings, tariff) {
         exportCredit: round2(credit),
         netCost: round2(importCost - credit),
         currency: tariff.currency,
+        ...pvSummary(last),
         ...batterySummary(first, last)
     };
+}
+
+// Live instantaneous PV fields, always the latest poll regardless of the
+// day/week range toggle — same pattern as batterySummary below. Gated on
+// MPPTTotalInputPower being present since PollerFunction only started
+// persisting it (and inverterTemperature) after this panel was added — a
+// reading from before that deploy just omits these keys and the dashboard
+// hides the panel, same backward-compat treatment as a missing batterySOC.
+function pvSummary(last) {
+    if (typeof last.MPPTTotalInputPower !== 'number') {
+        return {};
+    }
+
+    return {
+        currentPvPowerW: last.MPPTTotalInputPower,
+        currentPvStatus: classifyPvStatus(last.deviceStatus, last.MPPTTotalInputPower),
+        todayPvYieldKwh: typeof last.dailyYield === 'number' ? last.dailyYield : null,
+        inverterTemperatureC: typeof last.inverterTemperature === 'number' ? last.inverterTemperature : null
+    };
+}
+
+// deviceStatus 103 (recoverable) / 104 (permanent) are the only two fault
+// states in the inverter's large state list (Appendix 6) — same two codes
+// AlertFunction.checkInverterFault already treats as real faults, everything
+// else in that enum is a normal operating/mode state. Fault takes priority
+// over the power reading regardless of sign/magnitude.
+function classifyPvStatus(deviceStatus, powerW) {
+    if (deviceStatus === 103 || deviceStatus === 104) return 'fault';
+    if (typeof powerW === 'number' && powerW > 0) return 'producing';
+    return 'idle';
 }
 
 // last is the most recent reading in the queried range, which always ends at
@@ -542,6 +573,8 @@ function response(statusCode, body) {
 }
 
 module.exports.aggregateReadings = aggregateReadings;
+module.exports.pvSummary = pvSummary;
+module.exports.classifyPvStatus = classifyPvStatus;
 module.exports.formatInsightsResponse = formatInsightsResponse;
 module.exports.formatBatteryStatusResponse = formatBatteryStatusResponse;
 module.exports.formatBatterySettingsResponse = formatBatterySettingsResponse;

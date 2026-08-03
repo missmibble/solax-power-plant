@@ -61,6 +61,28 @@
 
   <p id="meta" class="meta"></p>
 
+  <section class="pv-status-panel" id="pvStatusPanelSection" hidden>
+    <h2>Current PV Status</h2>
+    <div class="cards">
+      <div class="card">
+        <span class="card-label">PV Power</span>
+        <span class="card-value" id="livePvPower">–</span>
+      </div>
+      <div class="card">
+        <span class="card-label">Status</span>
+        <span class="card-value" id="livePvStatus">–</span>
+      </div>
+      <div class="card">
+        <span class="card-label">Today's Yield</span>
+        <span class="card-value" id="livePvTodayYield">–</span>
+      </div>
+      <div class="card">
+        <span class="card-label">Inverter Temp</span>
+        <span class="card-value" id="liveInverterTemperature">–</span>
+      </div>
+    </div>
+  </section>
+
   <section class="battery-status-panel" id="batteryStatusPanelSection" hidden>
     <h2>Current Battery Status</h2>
     <div class="cards">
