@@ -147,7 +147,7 @@ describe('PollerFunction handler', () => {
         process.env.SOLAX_BASE_URL = 'https://openapi-eu.solaxcloud.com';
         process.env.SOLAX_BUSINESS_TYPE = '1';
         process.env.SOLAX_INVERTER_SN = 'H34ABCDEFG5001';
-        process.env.SOLAX_BATTERY_SN = 'REDACTED-BATTERY-SN';
+        process.env.SOLAX_BATTERY_SN = 'B34ABCDEFG5002';
         process.env.SOLAX_DEVICE_TYPE = '1';
         process.env.ENERGY_READINGS_TABLE = 'POWERPLANT-ENERGY-READINGS';
 
@@ -177,7 +177,7 @@ describe('PollerFunction handler', () => {
                 }]);
             }
             return Promise.resolve([{
-                deviceSn: 'REDACTED-BATTERY-SN', deviceStatus: 1, batterySOC: 98, batterySOH: null,
+                deviceSn: 'B34ABCDEFG5002', deviceStatus: 1, batterySOC: 98, batterySOH: null,
                 chargeDischargePower: -352, batteryTemperature: 22.0, batteryCycleTimes: 13,
                 batteryRemainings: 18.0, totalDeviceCharge: 246.2, totalDeviceDischarge: 222.2
             }]);
@@ -206,7 +206,7 @@ describe('PollerFunction handler', () => {
                 }]);
             }
             return Promise.resolve([{
-                deviceSn: 'REDACTED-BATTERY-SN', deviceStatus: 1, batterySOC: 98, batterySOH: null,
+                deviceSn: 'B34ABCDEFG5002', deviceStatus: 1, batterySOC: 98, batterySOH: null,
                 chargeDischargePower: -352, batteryTemperature: 22.0, batteryCycleTimes: 13,
                 batteryRemainings: 18.0, totalDeviceCharge: 246.2, totalDeviceDischarge: 222.2
             }]);
