@@ -78,14 +78,6 @@ const els = {
   batterySettingsSaveButton: document.getElementById('batterySettingsSaveButton'),
   runAssessmentButton: document.getElementById('runAssessmentButton'),
   triggerStatus: document.getElementById('triggerStatus'),
-  terminateGridDischargeButton: document.getElementById('terminateGridDischargeButton'),
-  gridDischargeStatus: document.getElementById('gridDischargeStatus'),
-  gridDischargeSettingsForm: document.getElementById('gridDischargeSettingsForm'),
-  gridDischargeEnabled: document.getElementById('gridDischargeEnabled'),
-  gridDischargeLive: document.getElementById('gridDischargeLive'),
-  gridDischargeLiveState: document.getElementById('gridDischargeLiveState'),
-  gridDischargeSettingsStatus: document.getElementById('gridDischargeSettingsStatus'),
-  gridDischargeSettingsSaveButton: document.getElementById('gridDischargeSettingsSaveButton'),
   settingsOptimizerSettingsForm: document.getElementById('settingsOptimizerSettingsForm'),
   settingsOptimizerAutoApply: document.getElementById('settingsOptimizerAutoApply'),
   settingsOptimizerAutoApplyState: document.getElementById('settingsOptimizerAutoApplyState'),
@@ -185,7 +177,6 @@ function showDashboard() {
   loadInsights();
   loadBatteryStatus();
   loadBatterySettings();
-  loadGridDischargeSettings();
   loadSettingsOptimization();
   loadSettingsOptimizerSettings();
 }
@@ -526,9 +517,9 @@ async function loadSettingsOptimization() {
 // The system's one self-directing switch: on, SettingsOptimizerFunction's
 // nightly recommendation writes straight into the live control settings with
 // no manual step; off (default), it only ever recommends. Same toggle-pill +
-// confirm() + unsaved-changes pattern as the battery/grid-discharge control
-// mode toggles — arguably the most consequential of the three, since it's the
-// one that lets the AI change what the *other* two toggles' settings are.
+// confirm() + unsaved-changes pattern as the battery control mode toggle —
+// arguably the more consequential of the two, since it's the one that lets
+// the AI change what that other toggle's settings are.
 
 async function loadSettingsOptimizerSettings() {
   try {
@@ -579,7 +570,7 @@ function applyBatterySettingsLockState(isLocked) {
 els.settingsOptimizerAutoApply.addEventListener('change', () => {
   if (els.settingsOptimizerAutoApply.checked) {
     const confirmed = window.confirm(
-      'Turn on full automation? Every night, the AI\'s settings recommendation will be written straight into the live battery/grid-discharge settings automatically — no manual review or save.'
+      'Turn on full automation? Every night, the AI\'s settings recommendation will be written straight into the live battery settings automatically — no manual review or save.'
     );
     if (!confirmed) {
       els.settingsOptimizerAutoApply.checked = false;
@@ -629,11 +620,6 @@ const BATTERY_SETTINGS_FIELD_LABELS = {
   disabledChargeUpperSoc: 'Default charge when disabled'
 };
 
-const GRID_DISCHARGE_SETTINGS_FIELD_LABELS = {
-  enabled: 'Evening discharge enabled',
-  dryRun: 'Control mode'
-};
-
 const SETTINGS_OPTIMIZER_SETTINGS_FIELD_LABELS = {
   autoApply: 'Full automation'
 };
@@ -678,9 +664,9 @@ function humanizeSettingsError(message, fieldLabels) {
 // toggle (which only updates on-screen state — it never saves by itself)
 // can never be mistaken for something that's already been persisted. Cleared
 // only on a successful save; a failed save leaves it marked, since the
-// change genuinely is still unsaved. Programmatic population (loadBatterySettings/
-// loadGridDischargeSettings setting .value/.checked from the server response)
-// doesn't fire input events, so this never triggers from a normal page load.
+// change genuinely is still unsaved. Programmatic population (loadBatterySettings
+// setting .value/.checked from the server response) doesn't fire input
+// events, so this never triggers from a normal page load.
 function setSaveButtonDirty(button, isDirty) {
   button.textContent = isDirty ? 'Save settings (unsaved changes)' : 'Save settings';
   button.classList.toggle('unsaved', isDirty);
@@ -819,98 +805,6 @@ els.runAssessmentButton.addEventListener('click', async () => {
     els.triggerStatus.textContent = data.message || 'Assessment started — check back shortly.';
   } catch (err) {
     els.triggerStatus.textContent = `Couldn't trigger assessment: ${err.message}`;
-  }
-});
-
-// ─── Grid discharge control settings (enabled + dry-run/live toggle) ───────
-
-async function loadGridDischargeSettings() {
-  try {
-    const res = await authorizedFetch('grid-discharge-settings');
-    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-
-    const data = await res.json();
-    els.gridDischargeEnabled.checked = data.enabled;
-    els.gridDischargeLive.checked = data.dryRun === false;
-    updateGridDischargeLiveStateLabel();
-    setGridDischargeSettingsStatus('');
-  } catch (err) {
-    setGridDischargeSettingsStatus(`Couldn't load settings: ${humanizeSettingsError(err.message, GRID_DISCHARGE_SETTINGS_FIELD_LABELS)}`);
-  }
-}
-
-function setGridDischargeSettingsStatus(message) {
-  els.gridDischargeSettingsStatus.textContent = message;
-  els.gridDischargeSettingsStatus.hidden = !message;
-}
-
-function updateGridDischargeLiveStateLabel() {
-  const isLive = els.gridDischargeLive.checked;
-  els.gridDischargeLiveState.textContent = isLive ? 'LIVE — will call the inverter' : 'Dry run';
-  els.gridDischargeLiveState.classList.toggle('is-live', isLive);
-}
-
-// Same reasoning as the battery control mode toggle — this can actually
-// discharge the battery to the grid, so switching to live gets a confirm
-// step rather than flipping on the same click.
-els.gridDischargeLive.addEventListener('change', () => {
-  if (els.gridDischargeLive.checked) {
-    const confirmed = window.confirm(
-      'Switch grid discharge to LIVE? It will call the real inverter API on its next start/check/exit phase, instead of only logging what it would do.'
-    );
-    if (!confirmed) {
-      els.gridDischargeLive.checked = false;
-    }
-  }
-  updateGridDischargeLiveStateLabel();
-});
-
-// Same reasoning as the battery settings form — the toggle-pills here never
-// save by themselves either.
-els.gridDischargeSettingsForm.addEventListener('input', () => {
-  setSaveButtonDirty(els.gridDischargeSettingsSaveButton, true);
-});
-
-els.gridDischargeSettingsForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  setGridDischargeSettingsStatus('Saving…');
-
-  try {
-    const res = await authorizedFetch('grid-discharge-settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        enabled: els.gridDischargeEnabled.checked,
-        dryRun: !els.gridDischargeLive.checked
-      })
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || `Request failed: ${res.status}`);
-    }
-
-    setSaveButtonDirty(els.gridDischargeSettingsSaveButton, false);
-    setGridDischargeSettingsStatus('Saved — takes effect on the next start/check/exit phase.');
-  } catch (err) {
-    setGridDischargeSettingsStatus(`Couldn't save settings: ${humanizeSettingsError(err.message, GRID_DISCHARGE_SETTINGS_FIELD_LABELS)}`);
-  }
-});
-
-// ─── Manual grid discharge termination ─────────────────────────────────────
-
-els.terminateGridDischargeButton.addEventListener('click', async () => {
-  els.gridDischargeStatus.hidden = false;
-  els.gridDischargeStatus.textContent = 'Requesting…';
-
-  try {
-    const res = await authorizedFetch('grid-discharge', { method: 'POST' });
-    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-
-    const data = await res.json();
-    els.gridDischargeStatus.textContent = data.message || 'Exit requested.';
-  } catch (err) {
-    els.gridDischargeStatus.textContent = `Couldn't request exit: ${err.message}`;
   }
 });
 

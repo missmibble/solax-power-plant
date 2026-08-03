@@ -39,8 +39,7 @@ const BASE_CONFIG = {
     lookbackDays: 7,
     minSampleSize: 3,
     maxAdjustmentPercent: 15,
-    batteryControlDefaults: { chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100 },
-    gridDischargeDefaults: { fallbackReservePercent: 26, safetyMarginPercent: 10 }
+    batteryControlDefaults: { chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100 }
 };
 
 function bedrockTextResponse(text) {
@@ -52,8 +51,6 @@ function validAiResponseText(overrides = {}) {
         chargeUpperSocSunny: null,
         chargeUpperSocPartlyCloudy: null,
         chargeUpperSocOvercast: null,
-        gridDischargeFallbackReservePercent: null,
-        gridDischargeSafetyMarginPercent: null,
         reasoning: 'Not enough evidence yet to recommend a change.',
         confidence: 'low',
         ...overrides
@@ -61,9 +58,9 @@ function validAiResponseText(overrides = {}) {
 }
 
 describe('SettingsOptimizerFunction', () => {
-    let summarizeBatteryControlHistory, summarizeGridDischargeHistory, parseOptimizationRecommendation,
+    let summarizeBatteryControlHistory, parseOptimizationRecommendation,
         buildRecommendations, buildOptimizationRecord, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
-        GRID_DISCHARGE_SETTINGS_PREFIX, SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler;
+        SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler;
 
     function findPutCalls() {
         return mockDynamoSend.mock.calls.map(call => call[0]).filter(cmd => cmd.__type === 'Put');
@@ -87,9 +84,9 @@ describe('SettingsOptimizerFunction', () => {
         process.env.SETTINGS_OPTIMIZER_CONFIG = JSON.stringify(BASE_CONFIG);
 
         ({
-            summarizeBatteryControlHistory, summarizeGridDischargeHistory, parseOptimizationRecommendation,
+            summarizeBatteryControlHistory, parseOptimizationRecommendation,
             buildRecommendations, buildOptimizationRecord, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
-            GRID_DISCHARGE_SETTINGS_PREFIX, SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler
+            SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler
         } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
     });
 
@@ -128,23 +125,6 @@ describe('SettingsOptimizerFunction', () => {
         });
     });
 
-    describe('summarizeGridDischargeHistory', () => {
-        test('aggregates start-phase records and counts import-triggered early exits', () => {
-            const summary = summarizeGridDischargeHistory([
-                { phase: 'start', enabled: true, surplusPercent: 20, shoulderNightReservePercent: 12 },
-                { phase: 'start', enabled: true, surplusPercent: 0, shoulderNightReservePercent: 8 },
-                { phase: 'start', enabled: false, surplusPercent: 15, shoulderNightReservePercent: 30 }, // disabled run, excluded
-                { phase: 'check', applied: true, dryRun: false, reasoning: 'Grid import detected (0.30 kWh) since the discharge window opened.' },
-                { phase: 'exit', applied: true, dryRun: false, reasoning: 'Exited VPP mode — inverter returned to its normal Self Use schedule.' }
-            ]);
-
-            expect(summary.totalNights).toBe(2);
-            expect(summary.nightsWithSurplus).toBe(1);
-            expect(summary.shoulderNightReserves).toEqual([12, 8]);
-            expect(summary.earlyExitDueToImportCount).toBe(1);
-        });
-    });
-
     describe('parseOptimizationRecommendation', () => {
         test('parses a well-formed response', () => {
             const parsed = parseOptimizationRecommendation(validAiResponseText({
@@ -165,33 +145,22 @@ describe('SettingsOptimizerFunction', () => {
     });
 
     describe('buildRecommendations', () => {
-        const currentValues = {
-            chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100,
-            gridDischargeFallbackReservePercent: 26, gridDischargeSafetyMarginPercent: 10
-        };
+        const currentValues = { chargeUpperSocSunny: 40, chargeUpperSocPartlyCloudy: 70, chargeUpperSocOvercast: 100 };
         const batterySummary = { sunny: { nights: 5 }, 'partly-cloudy': { nights: 4 }, overcast: { nights: 1 } };
-        const gridSummary = { shoulderNightReserves: [10, 12, 15, 9] }; // 4 sample nights
 
         test('holds the current value when the AI recommends null', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
-            };
+            const aiRecommendation = { chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: null };
             const result = buildRecommendations({
-                currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
+                currentValues, batterySummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocSunny.recommended).toBeNull();
             expect(result.chargeUpperSocPartlyCloudy.recommended).toBeNull();
-            expect(result.gridDischargeFallbackReservePercent.recommended).toBeNull();
         });
 
         test('applies a chargeUpperSocPartlyCloudy recommendation, sample-sized from the partly-cloudy classification count', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: 65, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
-            };
+            const aiRecommendation = { chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: 65, chargeUpperSocOvercast: null };
             const result = buildRecommendations({
-                currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
+                currentValues, batterySummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocPartlyCloudy.recommended).toBe(65);
             expect(result.chargeUpperSocPartlyCloudy.sampleSize).toBe(4);
@@ -199,12 +168,9 @@ describe('SettingsOptimizerFunction', () => {
 
         test('holds chargeUpperSocPartlyCloudy when its sample size is below minSampleSize', () => {
             const thinBatterySummary = { ...batterySummary, 'partly-cloudy': { nights: 2 } };
-            const aiRecommendation = {
-                chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: 65, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
-            };
+            const aiRecommendation = { chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: 65, chargeUpperSocOvercast: null };
             const result = buildRecommendations({
-                currentValues, batterySummary: thinBatterySummary, gridSummary, aiRecommendation,
+                currentValues, batterySummary: thinBatterySummary, aiRecommendation,
                 minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocPartlyCloudy.recommended).toBeNull();
@@ -212,14 +178,10 @@ describe('SettingsOptimizerFunction', () => {
         });
 
         test('holds the current value when sample size is below minSampleSize, even with an AI recommendation', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: 50, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
-            };
             // overcast has only 1 sample night < minSampleSize(3)
-            const aiRecommendationOvercast = { ...aiRecommendation, chargeUpperSocOvercast: 90, chargeUpperSocSunny: null };
+            const aiRecommendationOvercast = { chargeUpperSocSunny: null, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: 90 };
             const result = buildRecommendations({
-                currentValues, batterySummary, gridSummary, aiRecommendation: aiRecommendationOvercast,
+                currentValues, batterySummary, aiRecommendation: aiRecommendationOvercast,
                 minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocOvercast.recommended).toBeNull();
@@ -227,52 +189,32 @@ describe('SettingsOptimizerFunction', () => {
         });
 
         test('applies a recommendation within the max-adjustment bound as-is', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: 50, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
-            };
+            const aiRecommendation = { chargeUpperSocSunny: 50, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: null };
             const result = buildRecommendations({
-                currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
+                currentValues, batterySummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocSunny.recommended).toBe(50);
             expect(result.chargeUpperSocSunny.clamped).toBe(false);
         });
 
         test('clamps a recommendation that exceeds maxAdjustmentPercent from the current value', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: 90, chargeUpperSocOvercast: null, // 90 is 50 points above current(40), way past a 15-point bound
-                gridDischargeFallbackReservePercent: null, gridDischargeSafetyMarginPercent: null
-            };
+            // 90 is 50 points above current(40), way past a 15-point bound
+            const aiRecommendation = { chargeUpperSocSunny: 90, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: null };
             const result = buildRecommendations({
-                currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
+                currentValues, batterySummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
             });
             expect(result.chargeUpperSocSunny.recommended).toBe(55); // 40 + 15
             expect(result.chargeUpperSocSunny.clamped).toBe(true);
         });
 
         test('never recommends outside the 0-100 range', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: null, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: -10, gridDischargeSafetyMarginPercent: null
-            };
-            const lowCurrentValues = { ...currentValues, gridDischargeFallbackReservePercent: 5 };
+            const aiRecommendation = { chargeUpperSocSunny: -10, chargeUpperSocPartlyCloudy: null, chargeUpperSocOvercast: null };
+            const lowCurrentValues = { ...currentValues, chargeUpperSocSunny: 5 };
             const result = buildRecommendations({
-                currentValues: lowCurrentValues, batterySummary, gridSummary, aiRecommendation,
+                currentValues: lowCurrentValues, batterySummary, aiRecommendation,
                 minSampleSize: 3, maxAdjustmentPercent: 15
             });
-            expect(result.gridDischargeFallbackReservePercent.recommended).toBe(0);
-        });
-
-        test('grid-discharge values use shoulderNightReserves.length as the sample size for both settings', () => {
-            const aiRecommendation = {
-                chargeUpperSocSunny: null, chargeUpperSocOvercast: null,
-                gridDischargeFallbackReservePercent: 30, gridDischargeSafetyMarginPercent: 12
-            };
-            const result = buildRecommendations({
-                currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize: 3, maxAdjustmentPercent: 15
-            });
-            expect(result.gridDischargeFallbackReservePercent.sampleSize).toBe(4);
-            expect(result.gridDischargeSafetyMarginPercent.sampleSize).toBe(4);
+            expect(result.chargeUpperSocSunny.recommended).toBe(0);
         });
     });
 

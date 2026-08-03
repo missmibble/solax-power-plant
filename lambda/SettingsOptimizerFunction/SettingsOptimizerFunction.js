@@ -10,45 +10,33 @@ const snsClient = new SNSClient({ region: process.env.AWS_REGION });
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION });
 
-// Read-only: the sentinel prefixes BatteryControlFunction/GridDischargeFunction
-// already write their per-run decision records under.
+// Read-only: the sentinel prefix BatteryControlFunction already writes its
+// per-run decision records under.
 const BATTERY_STATUS_PREFIX = 'BATTERY_CONTROL#';
-const GRID_DISCHARGE_STATUS_PREFIX = 'GRID_DISCHARGE#';
-// Write targets when autoApply is on — the same dashboard-editable-settings
-// sentinel rows BatteryControlFunction/GridDischargeFunction already read
-// (BATTERY_CONTROL_SETTINGS# existed already; GRID_DISCHARGE_SETTINGS# was
-// added specifically so this function has somewhere to write grid-discharge
-// recommendations — see GridDischargeFunction.js).
+// Write target when autoApply is on — the same dashboard-editable-settings
+// sentinel row BatteryControlFunction already reads.
 const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
-const GRID_DISCHARGE_SETTINGS_PREFIX = 'GRID_DISCHARGE_SETTINGS#';
 // This function's own dashboard-editable setting — just autoApply itself
 // ("Full automation" on the dashboard's AI card). Same fixed-key-row pattern
-// as the other two settings prefixes above, read the same way via loadOverride.
+// as BATTERY_SETTINGS_PREFIX above, read the same way via loadOverride.
 const SETTINGS_OPTIMIZER_SETTINGS_PREFIX = 'SETTINGS_OPTIMIZER_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
 // This function's own nightly recommendation record.
 const STATUS_RECORD_PREFIX = 'SETTINGS_OPTIMIZATION#';
 
 const SYSTEM_PROMPT = `You are reviewing a week of operational history for a home solar + battery system, \
-to recommend whether five control-tuning defaults should be adjusted:
+to recommend whether three control-tuning defaults should be adjusted:
 
-1. chargeUpperSocSunny / chargeUpperSocPartlyCloudy / chargeUpperSocOvercast — how full the battery charges \
+chargeUpperSocSunny / chargeUpperSocPartlyCloudy / chargeUpperSocOvercast — how full the battery charges \
 overnight based on tomorrow's weather forecast (a lower sunny target relies on solar catching up during the \
 day; partly-cloudy is the ambiguous-forecast middle ground between sunny and overcast).
-2. gridDischargeFallbackReservePercent / gridDischargeSafetyMarginPercent — how much charge is held back \
-during a 5-9pm premium grid feed-in export window, to guarantee the household's own load is covered from \
-9pm until the next cheap overnight recharge at midnight.
 
-You are given the current effective value of each setting, and a summary of recent history: for the charge \
-targets, per-classification accuracy judgements already made by another automated nightly assessment \
-(was the target right in hindsight, and did household usage suggest it should change); for the grid \
-discharge settings, the actual overnight reserve the household needed each night, and how many times an \
-automated mid-window check detected grid import happening during the discharge window (a sign the reserve \
-was too tight that night).
+You are given the current effective value of each setting, and a summary of recent history: per-classification \
+accuracy judgements already made by another automated nightly assessment (was the target right in hindsight, \
+and did household usage suggest it should change).
 
 Respond with ONLY a JSON object of this exact form — no text outside the JSON:
 {"chargeUpperSocSunny": number|null, "chargeUpperSocPartlyCloudy": number|null, "chargeUpperSocOvercast": number|null, \
-"gridDischargeFallbackReservePercent": number|null, "gridDischargeSafetyMarginPercent": number|null, \
 "reasoning": string, "confidence": "low"|"medium"|"high"}
 
 Use null for any value you don't have enough evidence to recommend changing — the current value stays in \
@@ -108,28 +96,6 @@ function summarizeBatteryControlHistory(records) {
     return byClassification;
 }
 
-// shoulderNightReservePercent is the actual reserve GridDischargeFunction
-// calculated each night (from historical or fallback data) at the time —
-// tracking it here isn't circular, it's asking "did the reserve settings this
-// function might recommend changing actually hold up across the week."
-function summarizeGridDischargeHistory(records) {
-    const startRecords = records.filter(r => r.phase === 'start' && r.enabled);
-    const shoulderNightReserves = startRecords
-        .map(r => r.shoulderNightReservePercent)
-        .filter(v => typeof v === 'number');
-    const nightsWithSurplus = startRecords.filter(r => (r.surplusPercent || 0) > 0).length;
-    const earlyExitDueToImport = records.filter(
-        r => r.phase !== 'start' && (r.applied || r.dryRun) && /Grid import detected/.test(r.reasoning || '')
-    ).length;
-
-    return {
-        totalNights: startRecords.length,
-        nightsWithSurplus,
-        shoulderNightReserves,
-        earlyExitDueToImportCount: earlyExitDueToImport
-    };
-}
-
 function parseOptimizationRecommendation(text) {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
@@ -142,15 +108,13 @@ function parseOptimizationRecommendation(text) {
         chargeUpperSocSunny: numOrNull(parsed.chargeUpperSocSunny),
         chargeUpperSocPartlyCloudy: numOrNull(parsed.chargeUpperSocPartlyCloudy),
         chargeUpperSocOvercast: numOrNull(parsed.chargeUpperSocOvercast),
-        gridDischargeFallbackReservePercent: numOrNull(parsed.gridDischargeFallbackReservePercent),
-        gridDischargeSafetyMarginPercent: numOrNull(parsed.gridDischargeSafetyMarginPercent),
         reasoning: parsed.reasoning,
         confidence: parsed.confidence
     };
 }
 
-async function getRecommendation(modelId, currentValues, batterySummary, gridSummary) {
-    const prompt = JSON.stringify({ currentValues, batteryControlHistory: batterySummary, gridDischargeHistory: gridSummary });
+async function getRecommendation(modelId, currentValues, batterySummary) {
+    const prompt = JSON.stringify({ currentValues, batteryControlHistory: batterySummary });
 
     const response = await bedrockClient.send(new InvokeModelCommand({
         modelId,
@@ -168,14 +132,14 @@ async function getRecommendation(modelId, currentValues, batterySummary, gridSum
     return parseOptimizationRecommendation(payload.content?.[0]?.text || '');
 }
 
-// The core decision: for each of the 4 tunable values, only ever acts when
+// The core decision: for each of the 3 tunable values, only ever acts when
 // there's both an AI recommendation AND enough sample nights to trust it —
 // missing either means "recommended: null", i.e. hold the current value.
 // Whatever does get recommended is clamped to at most maxAdjustmentPercent
 // (percentage points, not a relative %) away from the current value and to
 // [0, 100] — a single Bedrock response, however confident, can't swing a
 // control-relevant setting further than that in one run.
-function buildRecommendations({ currentValues, batterySummary, gridSummary, aiRecommendation, minSampleSize, maxAdjustmentPercent }) {
+function buildRecommendations({ currentValues, batterySummary, aiRecommendation, minSampleSize, maxAdjustmentPercent }) {
     function evaluate(key, currentValue, sampleSize) {
         const recommended = aiRecommendation ? aiRecommendation[key] : null;
 
@@ -206,13 +170,7 @@ function buildRecommendations({ currentValues, batterySummary, gridSummary, aiRe
         chargeUpperSocPartlyCloudy: evaluate(
             'chargeUpperSocPartlyCloudy', currentValues.chargeUpperSocPartlyCloudy, batterySummary['partly-cloudy']?.nights || 0
         ),
-        chargeUpperSocOvercast: evaluate('chargeUpperSocOvercast', currentValues.chargeUpperSocOvercast, batterySummary.overcast?.nights || 0),
-        gridDischargeFallbackReservePercent: evaluate(
-            'gridDischargeFallbackReservePercent', currentValues.gridDischargeFallbackReservePercent, gridSummary.shoulderNightReserves.length
-        ),
-        gridDischargeSafetyMarginPercent: evaluate(
-            'gridDischargeSafetyMarginPercent', currentValues.gridDischargeSafetyMarginPercent, gridSummary.shoulderNightReserves.length
-        )
+        chargeUpperSocOvercast: evaluate('chargeUpperSocOvercast', currentValues.chargeUpperSocOvercast, batterySummary.overcast?.nights || 0)
     };
 }
 
@@ -222,9 +180,7 @@ function buildRecommendations({ currentValues, batterySummary, gridSummary, aiRe
 const SETTING_LABELS = {
     chargeUpperSocSunny: 'Overnight charge target (sunny forecast)',
     chargeUpperSocPartlyCloudy: 'Overnight charge target (partly cloudy forecast)',
-    chargeUpperSocOvercast: 'Overnight charge target (overcast forecast)',
-    gridDischargeFallbackReservePercent: 'Grid-export reserve buffer',
-    gridDischargeSafetyMarginPercent: 'Grid-export safety margin'
+    chargeUpperSocOvercast: 'Overnight charge target (overcast forecast)'
 };
 
 function formatMessage(recommendations, aiRecommendation, autoApply) {
@@ -288,11 +244,9 @@ function mergedSources(existingSources, updatedKeys) {
     return sources;
 }
 
-// Merges (not replaces) each settings row so a human-set enabled/on-off toggle
+// Merges (not replaces) the settings row so a human-set enabled/on-off toggle
 // or a not-recommended-this-week field already saved there isn't clobbered.
-async function applyRecommendations(deviceSn, recommendations, existingBatteryOverride, existingGridOverride) {
-    let appliedAny = false;
-
+async function applyRecommendations(deviceSn, recommendations, existingBatteryOverride) {
     const batteryUpdate = {};
     if (recommendations.chargeUpperSocSunny.recommended !== null) {
         batteryUpdate.chargeUpperSocSunny = recommendations.chargeUpperSocSunny.recommended;
@@ -303,38 +257,17 @@ async function applyRecommendations(deviceSn, recommendations, existingBatteryOv
     if (recommendations.chargeUpperSocOvercast.recommended !== null) {
         batteryUpdate.chargeUpperSocOvercast = recommendations.chargeUpperSocOvercast.recommended;
     }
-    if (Object.keys(batteryUpdate).length > 0) {
-        await docClient.send(new PutCommand({
-            TableName: process.env.ENERGY_READINGS_TABLE,
-            Item: {
-                DeviceSn: `${BATTERY_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP,
-                ...existingBatteryOverride, ...batteryUpdate,
-                sources: mergedSources(existingBatteryOverride?.sources, Object.keys(batteryUpdate))
-            }
-        }));
-        appliedAny = true;
-    }
+    if (Object.keys(batteryUpdate).length === 0) return false;
 
-    const gridUpdate = {};
-    if (recommendations.gridDischargeFallbackReservePercent.recommended !== null) {
-        gridUpdate.fallbackReservePercent = recommendations.gridDischargeFallbackReservePercent.recommended;
-    }
-    if (recommendations.gridDischargeSafetyMarginPercent.recommended !== null) {
-        gridUpdate.safetyMarginPercent = recommendations.gridDischargeSafetyMarginPercent.recommended;
-    }
-    if (Object.keys(gridUpdate).length > 0) {
-        await docClient.send(new PutCommand({
-            TableName: process.env.ENERGY_READINGS_TABLE,
-            Item: {
-                DeviceSn: `${GRID_DISCHARGE_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP,
-                ...existingGridOverride, ...gridUpdate,
-                sources: mergedSources(existingGridOverride?.sources, Object.keys(gridUpdate))
-            }
-        }));
-        appliedAny = true;
-    }
-
-    return appliedAny;
+    await docClient.send(new PutCommand({
+        TableName: process.env.ENERGY_READINGS_TABLE,
+        Item: {
+            DeviceSn: `${BATTERY_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP,
+            ...existingBatteryOverride, ...batteryUpdate,
+            sources: mergedSources(existingBatteryOverride?.sources, Object.keys(batteryUpdate))
+        }
+    }));
+    return true;
 }
 
 exports.handler = async () => {
@@ -355,12 +288,10 @@ exports.handler = async () => {
         const nowSeconds = Math.floor(Date.now() / 1000);
         const sinceSeconds = nowSeconds - config.lookbackDays * 24 * 60 * 60;
 
-        const [batteryOverride, gridOverride, optimizerSettingsOverride, batteryRecords, gridRecords] = await Promise.all([
+        const [batteryOverride, optimizerSettingsOverride, batteryRecords] = await Promise.all([
             loadOverride(BATTERY_SETTINGS_PREFIX, deviceSn),
-            loadOverride(GRID_DISCHARGE_SETTINGS_PREFIX, deviceSn),
             loadOverride(SETTINGS_OPTIMIZER_SETTINGS_PREFIX, deviceSn),
-            queryRecentRecords(BATTERY_STATUS_PREFIX, deviceSn, sinceSeconds),
-            queryRecentRecords(GRID_DISCHARGE_STATUS_PREFIX, deviceSn, sinceSeconds)
+            queryRecentRecords(BATTERY_STATUS_PREFIX, deviceSn, sinceSeconds)
         ]);
 
         // The dashboard's "Full automation" toggle overrides config.autoApply the
@@ -371,13 +302,10 @@ exports.handler = async () => {
         const currentValues = {
             chargeUpperSocSunny: batteryOverride?.chargeUpperSocSunny ?? config.batteryControlDefaults.chargeUpperSocSunny,
             chargeUpperSocPartlyCloudy: batteryOverride?.chargeUpperSocPartlyCloudy ?? config.batteryControlDefaults.chargeUpperSocPartlyCloudy,
-            chargeUpperSocOvercast: batteryOverride?.chargeUpperSocOvercast ?? config.batteryControlDefaults.chargeUpperSocOvercast,
-            gridDischargeFallbackReservePercent: gridOverride?.fallbackReservePercent ?? config.gridDischargeDefaults.fallbackReservePercent,
-            gridDischargeSafetyMarginPercent: gridOverride?.safetyMarginPercent ?? config.gridDischargeDefaults.safetyMarginPercent
+            chargeUpperSocOvercast: batteryOverride?.chargeUpperSocOvercast ?? config.batteryControlDefaults.chargeUpperSocOvercast
         };
 
         const batterySummary = summarizeBatteryControlHistory(batteryRecords);
-        const gridSummary = summarizeGridDischargeHistory(gridRecords);
 
         // A Bedrock call failure here is a real failure, not graceful
         // degradation — unlike ReportFunction/BatteryControlFunction's AI
@@ -386,16 +314,16 @@ exports.handler = async () => {
         // (but successfully returned) response still degrades gracefully to
         // "no recommendation" via parseOptimizationRecommendation, same as
         // parseAiResponse/parseAccuracyAssessment elsewhere.
-        const aiRecommendation = await getRecommendation(modelId, currentValues, batterySummary, gridSummary);
+        const aiRecommendation = await getRecommendation(modelId, currentValues, batterySummary);
 
         const recommendations = buildRecommendations({
-            currentValues, batterySummary, gridSummary, aiRecommendation,
+            currentValues, batterySummary, aiRecommendation,
             minSampleSize: config.minSampleSize, maxAdjustmentPercent: config.maxAdjustmentPercent
         });
 
         let applied = false;
         if (effectiveAutoApply) {
-            applied = await applyRecommendations(deviceSn, recommendations, batteryOverride, gridOverride);
+            applied = await applyRecommendations(deviceSn, recommendations, batteryOverride);
         }
 
         const message = formatMessage(recommendations, aiRecommendation, effectiveAutoApply);
@@ -424,11 +352,9 @@ exports.handler = async () => {
 };
 
 module.exports.summarizeBatteryControlHistory = summarizeBatteryControlHistory;
-module.exports.summarizeGridDischargeHistory = summarizeGridDischargeHistory;
 module.exports.parseOptimizationRecommendation = parseOptimizationRecommendation;
 module.exports.buildRecommendations = buildRecommendations;
 module.exports.buildOptimizationRecord = buildOptimizationRecord;
 module.exports.STATUS_RECORD_PREFIX = STATUS_RECORD_PREFIX;
 module.exports.BATTERY_SETTINGS_PREFIX = BATTERY_SETTINGS_PREFIX;
-module.exports.GRID_DISCHARGE_SETTINGS_PREFIX = GRID_DISCHARGE_SETTINGS_PREFIX;
 module.exports.SETTINGS_OPTIMIZER_SETTINGS_PREFIX = SETTINGS_OPTIMIZER_SETTINGS_PREFIX;

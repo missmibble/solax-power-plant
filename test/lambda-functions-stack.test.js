@@ -32,8 +32,8 @@ describe('LambdaFunctionsStack', () => {
         template = Template.fromStack(lambdaStack);
     });
 
-    test('creates PollerFunction, DashboardApiFunction, AlertFunction, ReportFunction, BatteryControlFunction, GridDischargeFunction, and SettingsOptimizerFunction', () => {
-        template.resourceCountIs('AWS::Lambda::Function', 7);
+    test('creates PollerFunction, DashboardApiFunction, AlertFunction, ReportFunction, BatteryControlFunction, and SettingsOptimizerFunction', () => {
+        template.resourceCountIs('AWS::Lambda::Function', 6);
     });
 
     test('schedules PollerFunction every 5 minutes via EventBridge', () => {
@@ -86,18 +86,6 @@ describe('LambdaFunctionsStack', () => {
                 Environment: { Variables: Match.objectLike({ TARIFF_STRUCTURE: tariffJson }) }
             });
         }
-    });
-
-    test('DashboardApiFunction gets grid-discharge-settings defaults (enabled + dry-run) as env vars, sourced from config.gridDischarge', () => {
-        template.hasResourceProperties('AWS::Lambda::Function', {
-            FunctionName: config.lambda.dashboardApiFunction.functionName,
-            Environment: {
-                Variables: Match.objectLike({
-                    GRID_DISCHARGE_DEFAULT_ENABLED: String(config.gridDischarge.enabled),
-                    GRID_DISCHARGE_DEFAULT_DRY_RUN: String(config.gridDischarge.dryRun !== false)
-                })
-            }
-        });
     });
 
     test('DashboardApiFunction gets the settings-optimizer-settings autoApply default as an env var, sourced from config.settingsOptimizer', () => {
@@ -352,93 +340,6 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
-    test('GridDischargeFunction gets the readings table, SolaX, tariff, and merged grid-discharge config as env vars', () => {
-        const gridDischargeConfigJson = JSON.stringify({ ...config.gridDischarge, minSoc: config.batteryControl.minSoc });
-
-        template.hasResourceProperties('AWS::Lambda::Function', {
-            FunctionName: config.lambda.gridDischargeFunction.functionName,
-            Environment: {
-                Variables: Match.objectLike({
-                    ENERGY_READINGS_TABLE: Match.anyValue(),
-                    SOLAX_INVERTER_SN: config.solax.inverterSn,
-                    GRID_DISCHARGE_CONFIG: gridDischargeConfigJson
-                })
-            }
-        });
-    });
-
-    test('schedules GridDischargeFunction start (5pm), check (7pm), and exit (9pm) as three separate EventBridge rules', () => {
-        template.hasResourceProperties('AWS::Events::Rule', {
-            ScheduleExpression: config.lambda.gridDischargeFunction.startSchedule,
-            Targets: Match.arrayWith([
-                Match.objectLike({ Input: JSON.stringify({ phase: 'start' }) })
-            ])
-        });
-
-        template.hasResourceProperties('AWS::Events::Rule', {
-            ScheduleExpression: config.lambda.gridDischargeFunction.checkSchedule,
-            Targets: Match.arrayWith([
-                Match.objectLike({ Input: JSON.stringify({ phase: 'check' }) })
-            ])
-        });
-
-        template.hasResourceProperties('AWS::Events::Rule', {
-            ScheduleExpression: config.lambda.gridDischargeFunction.exitSchedule,
-            Targets: Match.arrayWith([
-                Match.objectLike({ Input: JSON.stringify({ phase: 'exit' }) })
-            ])
-        });
-    });
-
-    test('GridDischargeFunction role can read SolaX SSM parameters and read/write the energy readings table', () => {
-        const policies = template.findResources('AWS::IAM::Policy', {
-            Properties: { PolicyName: Match.stringLikeRegexp('GridDischargeFunction') }
-        });
-        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
-
-        expect(statements.some(s => s.Action?.includes?.('ssm:GetParameter'))).toBe(true);
-        const dynamoStatement = statements.find(s => s.Action?.includes?.('dynamodb:PutItem'));
-        expect(dynamoStatement).toBeDefined();
-        expect(dynamoStatement.Action).toEqual(expect.arrayContaining(['dynamodb:GetItem', 'dynamodb:Query', 'dynamodb:PutItem']));
-    });
-
-    test('GridDischargeFunction role can publish to both SNS topics', () => {
-        const policies = template.findResources('AWS::IAM::Policy', {
-            Properties: { PolicyName: Match.stringLikeRegexp('GridDischargeFunction') }
-        });
-        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
-        const publishStatements = statements.filter(s => s.Action === 'sns:Publish');
-
-        expect(publishStatements).toHaveLength(2);
-    });
-
-    test('creates a CloudWatch alarm for GridDischargeFunction errors', () => {
-        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
-            AlarmName: 'powerplant-GridDischarge-errors'
-        });
-    });
-
-    test('creates a POST /grid-discharge API resource requiring Cognito authorization (manual terminate-early button)', () => {
-        const resources = template.findResources('AWS::ApiGateway::Resource', {
-            Properties: { PathPart: 'grid-discharge' }
-        });
-        expect(Object.keys(resources)).toHaveLength(1);
-
-        template.hasResourceProperties('AWS::ApiGateway::Method', {
-            HttpMethod: 'POST',
-            AuthorizationType: 'COGNITO_USER_POOLS',
-            ResourceId: { Ref: Object.keys(resources)[0] }
-        });
-    });
-
-    test('creates a /grid-discharge-settings API resource with GET and PUT methods', () => {
-        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'grid-discharge-settings' });
-        template.hasResourceProperties('AWS::ApiGateway::Method', {
-            HttpMethod: 'PUT',
-            AuthorizationType: 'COGNITO_USER_POOLS'
-        });
-    });
-
     test('creates a /settings-optimization API resource with a GET method requiring Cognito authorization', () => {
         const resources = template.findResources('AWS::ApiGateway::Resource', {
             Properties: { PathPart: 'settings-optimization' }
@@ -460,26 +361,6 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
-    test('DashboardApiFunction gets the GridDischargeFunction name as an env var (manual terminate-early button)', () => {
-        template.hasResourceProperties('AWS::Lambda::Function', {
-            FunctionName: config.lambda.dashboardApiFunction.functionName,
-            Environment: {
-                Variables: Match.objectLike({ GRID_DISCHARGE_FUNCTION_NAME: Match.anyValue() })
-            }
-        });
-    });
-
-    test('DashboardApiFunction role can invoke GridDischargeFunction (manual terminate-early button)', () => {
-        const policies = template.findResources('AWS::IAM::Policy', {
-            Properties: { PolicyName: Match.stringLikeRegexp('DashboardApiFunction') }
-        });
-        const statements = Object.values(policies).flatMap(p => p.Properties.PolicyDocument.Statement);
-        const invokeStatements = statements.filter(s => s.Action === 'lambda:InvokeFunction');
-
-        // One for ReportFunction (manual assessment trigger), one for GridDischargeFunction.
-        expect(invokeStatements.length).toBeGreaterThanOrEqual(2);
-    });
-
     test('SettingsOptimizerFunction gets the readings table, SolaX SN, Bedrock model, and merged optimizer config as env vars', () => {
         const settingsOptimizerConfigJson = JSON.stringify({
             ...config.settingsOptimizer,
@@ -487,10 +368,6 @@ describe('LambdaFunctionsStack', () => {
                 chargeUpperSocSunny: config.batteryControl.chargeUpperSocSunny,
                 chargeUpperSocPartlyCloudy: config.batteryControl.chargeUpperSocPartlyCloudy,
                 chargeUpperSocOvercast: config.batteryControl.chargeUpperSocOvercast
-            },
-            gridDischargeDefaults: {
-                fallbackReservePercent: config.gridDischarge.fallbackReservePercent,
-                safetyMarginPercent: config.gridDischarge.safetyMarginPercent
             }
         });
 

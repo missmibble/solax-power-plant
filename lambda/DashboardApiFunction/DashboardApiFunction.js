@@ -20,18 +20,12 @@ const RANGE_SECONDS = {
 const REPORT_RECORD_PREFIX = 'REPORT#';
 const BATTERY_STATUS_RECORD_PREFIX = 'BATTERY_CONTROL#';
 const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
-// Matches GridDischargeFunction.SETTINGS_PREFIX — also written by
-// SettingsOptimizerFunction (fallbackReservePercent/safetyMarginPercent, when
-// autoApply: true), so the PUT handler below merges rather than replaces —
-// unlike battery-settings, this dashboard form doesn't own every field in
-// the row and must not clobber ones it doesn't know about.
-const GRID_DISCHARGE_SETTINGS_PREFIX = 'GRID_DISCHARGE_SETTINGS#';
 // Matches SettingsOptimizerFunction.STATUS_RECORD_PREFIX — its nightly
 // recommendation record, read-only here (this Lambda never writes it).
 const SETTINGS_OPTIMIZATION_PREFIX = 'SETTINGS_OPTIMIZATION#';
 // Matches SettingsOptimizerFunction.SETTINGS_OPTIMIZER_SETTINGS_PREFIX — the
 // dashboard-editable "Full automation" (autoApply) toggle, same fixed-key-row
-// pattern as BATTERY_SETTINGS_PREFIX/GRID_DISCHARGE_SETTINGS_PREFIX above.
+// pattern as BATTERY_SETTINGS_PREFIX above.
 const SETTINGS_OPTIMIZER_SETTINGS_PREFIX = 'SETTINGS_OPTIMIZER_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
 
@@ -72,18 +66,6 @@ exports.handler = async (event) => {
 
     if (event.resource === '/battery-settings') {
         return handleGetBatterySettings();
-    }
-
-    if (event.resource === '/grid-discharge' && event.httpMethod === 'POST') {
-        return handleTriggerGridDischargeExit();
-    }
-
-    if (event.resource === '/grid-discharge-settings' && event.httpMethod === 'PUT') {
-        return handlePutGridDischargeSettings(event);
-    }
-
-    if (event.resource === '/grid-discharge-settings') {
-        return handleGetGridDischargeSettings();
     }
 
     if (event.resource === '/settings-optimization') {
@@ -258,105 +240,11 @@ async function handleTriggerAssessment() {
     }
 }
 
-// Manual "terminate discharge early" button — invokes GridDischargeFunction's
-// exit phase on demand, same InvocationType: 'Event' fire-and-forget pattern
-// as handleTriggerAssessment. Reuses the existing exit phase unchanged (it
-// already unconditionally calls exit_vpp_mode and hands control back to Self
-// Use), so this is just an on-demand trigger, not new discharge-control logic
-// — safe to press even if nothing is currently running.
-async function handleTriggerGridDischargeExit() {
-    try {
-        await lambdaClient.send(new InvokeCommand({
-            FunctionName: process.env.GRID_DISCHARGE_FUNCTION_NAME,
-            InvocationType: 'Event',
-            Payload: JSON.stringify({ phase: 'exit' })
-        }));
-        return response(202, { triggered: true, message: 'Exit requested — the inverter should return to its normal schedule shortly.' });
-    } catch (err) {
-        logError('Failed to trigger grid discharge exit', { error: err.message });
-        return response(500, { message: 'Internal server error' });
-    }
-}
-
-// Dashboard-editable enabled/dryRun for GridDischargeFunction — same
-// sentinel-key settings row it reads (GridDischargeFunction.loadSettingsOverride),
-// which SettingsOptimizerFunction can also write to (fallbackReservePercent/
-// safetyMarginPercent, autoApply only). This dashboard form only ever edits
-// enabled/dryRun, so unlike battery-settings the PUT handler merges over the
-// existing row instead of replacing it outright.
-async function handleGetGridDischargeSettings() {
-    try {
-        const deviceSn = process.env.SOLAX_INVERTER_SN;
-        const result = await docClient.send(new GetCommand({
-            TableName: process.env.ENERGY_READINGS_TABLE,
-            Key: { DeviceSn: `${GRID_DISCHARGE_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP }
-        }));
-        return response(200, formatGridDischargeSettingsResponse(result.Item));
-    } catch (err) {
-        logError('Grid discharge settings query failed', { error: err.message });
-        return response(500, { message: 'Internal server error' });
-    }
-}
-
-async function handlePutGridDischargeSettings(event) {
-    let body;
-    try {
-        body = JSON.parse(event.body || '{}');
-    } catch {
-        return response(400, { message: 'Request body must be valid JSON' });
-    }
-
-    const validationError = validateGridDischargeSettings(body);
-    if (validationError) {
-        return response(400, { message: validationError });
-    }
-
-    try {
-        const deviceSn = process.env.SOLAX_INVERTER_SN;
-        const key = { DeviceSn: `${GRID_DISCHARGE_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP };
-
-        const existing = await docClient.send(new GetCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Key: key }));
-        const item = {
-            ...existing.Item,
-            ...key,
-            enabled: body.enabled,
-            dryRun: body.dryRun,
-            sources: { ...existing.Item?.sources, enabled: 'dashboard', dryRun: 'dashboard' }
-        };
-
-        await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
-        logInfo('Grid discharge settings updated', item);
-        return response(200, formatGridDischargeSettingsResponse(item));
-    } catch (err) {
-        logError('Grid discharge settings update failed', { error: err.message });
-        return response(500, { message: 'Internal server error' });
-    }
-}
-
-function validateGridDischargeSettings(body) {
-    if (typeof body.enabled !== 'boolean') return 'enabled must be a boolean';
-    if (typeof body.dryRun !== 'boolean') return 'dryRun must be a boolean';
-    return null;
-}
-
-function formatGridDischargeSettingsResponse(item) {
-    return {
-        enabled: item?.enabled ?? (process.env.GRID_DISCHARGE_DEFAULT_ENABLED !== 'false'),
-        dryRun: item?.dryRun ?? (process.env.GRID_DISCHARGE_DEFAULT_DRY_RUN !== 'false'),
-        usingDefaults: !item,
-        sources: {
-            enabled: fieldSource(item, 'enabled'),
-            dryRun: fieldSource(item, 'dryRun')
-        }
-    };
-}
-
 // Dashboard-editable "Full automation" toggle for SettingsOptimizerFunction —
 // same sentinel-key settings row it reads (SettingsOptimizerFunction.loadOverride
 // with SETTINGS_OPTIMIZER_SETTINGS_PREFIX). Deliberately its own row (not folded
 // into GET /settings-optimization, which is read-only reporting on the latest
-// recommendation) — same separation as GridDischargeFunction's action-trigger
-// POST /grid-discharge vs. its editable GET/PUT /grid-discharge-settings.
+// recommendation).
 async function handleGetSettingsOptimizerSettings() {
     try {
         const deviceSn = process.env.SOLAX_INVERTER_SN;
@@ -461,10 +349,8 @@ async function handlePutBatterySettings(event) {
             chargeUpperSocOvercast: body.chargeUpperSocOvercast,
             disabledChargeUpperSoc: body.disabledChargeUpperSoc,
             // The dashboard form always submits every field together (a full
-            // replace, not a merge — see the module-level comment on
-            // GRID_DISCHARGE_SETTINGS_PREFIX for how that differs from the grid
-            // discharge form), so every field's source becomes 'dashboard' on
-            // every save, even for a value that happened not to change.
+            // replace, not a merge), so every field's source becomes 'dashboard'
+            // on every save, even for a value that happened not to change.
             sources: {
                 enabled: 'dashboard', dryRun: 'dashboard', chargeUpperSocSunny: 'dashboard',
                 chargeUpperSocPartlyCloudy: 'dashboard', chargeUpperSocOvercast: 'dashboard',
@@ -660,8 +546,6 @@ module.exports.formatInsightsResponse = formatInsightsResponse;
 module.exports.formatBatteryStatusResponse = formatBatteryStatusResponse;
 module.exports.formatBatterySettingsResponse = formatBatterySettingsResponse;
 module.exports.validateBatterySettings = validateBatterySettings;
-module.exports.formatGridDischargeSettingsResponse = formatGridDischargeSettingsResponse;
-module.exports.validateGridDischargeSettings = validateGridDischargeSettings;
 module.exports.formatSettingsOptimizationResponse = formatSettingsOptimizationResponse;
 module.exports.formatSettingsOptimizerSettingsResponse = formatSettingsOptimizerSettingsResponse;
 module.exports.validateSettingsOptimizerSettings = validateSettingsOptimizerSettings;

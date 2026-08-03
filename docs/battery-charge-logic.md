@@ -8,7 +8,7 @@ Today, the household manually sets the inverter's grid-charge target (`chargeUpp
 
 ## When it runs
 
-Nightly at **21:30 Brisbane time** (`cron(30 11 * * ? *)` — 11:30 UTC; Queensland doesn't observe DST, so this is a fixed offset year-round, no seasonal drift). This is deliberately *before* the 00:00–06:00 overnight charge window starts, so whatever `chargeUpperSoc` it decides on is in place before grid-charging begins that night — and deliberately *after* `GridDischargeFunction`'s 21:00 exit phase (see [docs/grid-discharge-logic.md](grid-discharge-logic.md)), not the original 20:00, which fell inside that function's 17:00–21:00 discharge window and risked the two Lambdas contending for control of the same inverter.
+Nightly at **21:30 Brisbane time** (`cron(30 11 * * ? *)` — 11:30 UTC; Queensland doesn't observe DST, so this is a fixed offset year-round, no seasonal drift). This is deliberately *before* the 00:00–06:00 overnight charge window starts, so whatever `chargeUpperSoc` it decides on is in place before grid-charging begins that night.
 
 "Tomorrow" is computed as the calendar date following the current one, in `Australia/Brisbane` local time, at the moment the function runs (~21:30) — i.e., the day that starts right after tonight's charge window ends. That same date is stored on the status record as `appliesToDate` (via `tariff.localDateString`, the same helper `fetchTomorrowForecast` uses to request that exact local date from Open-Meteo) and shown on the dashboard's "Charge decision" widget as "Applies from &lt;date&gt;" — computed identically regardless of whether the run was a real forecast decision or the disabled-toggle default, since both take effect at the same overnight window.
 
