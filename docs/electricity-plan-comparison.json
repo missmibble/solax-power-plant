@@ -1238,7 +1238,15 @@
       "distributor": "Energex"
     },
     "note": "A different OVO plan from 'The EV Plan' already listed above (OVO723742MRE20, sourced from Energy Made Easy on 2026-08-02) — do not conflate the two. All rates below are GST-inclusive except Solar FiT, which the source page marks excl. GST.",
-    "caveat": "The source widget gives rate labels and c/kWh values only, not the clock-hour boundaries for peak/shoulder/off-peak/EV off-peak — those live on each variant's linked Energy Made Easy Basic Plan Information page (id given per variant below). Do not use this data for overnight-window cost modelling until those hours are confirmed.",
+    "time_of_use_windows": {
+      "confirmed_by": "direct confirmation (not scraped) — TOU variant's periods stated to match AGL's exactly",
+      "applies_to_variants": ["The Basic EV Plan (TOU)", "The Basic EV Plan (TOU + CL1)", "The Basic EV Plan (TOU + CL2)"],
+      "ev_off_peak": "00:00-06:00",
+      "shoulder": "06:00-09:00, 21:00-24:00",
+      "off_peak": "09:00-16:00",
+      "peak": "16:00-21:00",
+      "note": "Not confirmed for the flat-rate variants (The Basic EV Plan / CL1 / CL2) — their ev_off_peak window may or may not be the same 00:00-06:00 carve-out."
+    },
     "variants": [
       {
         "variant_name": "The Basic EV Plan",
@@ -1284,11 +1292,11 @@
         "structure": "time-of-use + controlled load 1 + EV off-peak",
         "supply_charge_c_per_day": 186.7404,
         "rates": {
-          "peak": { "rate_c_kwh": 50.1732 },
-          "shoulder": { "rate_c_kwh": 26.5534 },
-          "off_peak": { "rate_c_kwh": 7.3227 },
+          "peak": { "rate_c_kwh": 50.1732, "times": "16:00-21:00" },
+          "shoulder": { "rate_c_kwh": 26.5534, "times": "06:00-09:00, 21:00-24:00" },
+          "off_peak": { "rate_c_kwh": 7.3227, "times": "09:00-16:00" },
           "controlled_load_1": { "rate_c_kwh": 17.2441 },
-          "ev_off_peak": { "rate_c_kwh": 4.72 }
+          "ev_off_peak": { "rate_c_kwh": 4.72, "times": "00:00-06:00" }
         },
         "solar_fit_c_kwh": 1,
         "solar_fit_gst": "excl. GST"
@@ -1299,11 +1307,11 @@
         "structure": "time-of-use + controlled load 2 + EV off-peak",
         "supply_charge_c_per_day": 186.7404,
         "rates": {
-          "peak": { "rate_c_kwh": 50.1732 },
-          "shoulder": { "rate_c_kwh": 26.5534 },
-          "off_peak": { "rate_c_kwh": 7.3227 },
+          "peak": { "rate_c_kwh": 50.1732, "times": "16:00-21:00" },
+          "shoulder": { "rate_c_kwh": 26.5534, "times": "06:00-09:00, 21:00-24:00" },
+          "off_peak": { "rate_c_kwh": 7.3227, "times": "09:00-16:00" },
           "controlled_load_2": { "rate_c_kwh": 17.5791 },
-          "ev_off_peak": { "rate_c_kwh": 4.72 }
+          "ev_off_peak": { "rate_c_kwh": 4.72, "times": "00:00-06:00" }
         },
         "solar_fit_c_kwh": 1,
         "solar_fit_gst": "excl. GST"
@@ -1314,14 +1322,27 @@
         "structure": "time-of-use + EV off-peak, no controlled load",
         "supply_charge_c_per_day": 186.7404,
         "rates": {
-          "peak": { "rate_c_kwh": 50.1732 },
-          "shoulder": { "rate_c_kwh": 26.5534 },
-          "off_peak": { "rate_c_kwh": 7.3227 },
-          "ev_off_peak": { "rate_c_kwh": 4.72 }
+          "peak": { "rate_c_kwh": 50.1732, "times": "16:00-21:00" },
+          "shoulder": { "rate_c_kwh": 26.5534, "times": "06:00-09:00, 21:00-24:00" },
+          "off_peak": { "rate_c_kwh": 7.3227, "times": "09:00-16:00" },
+          "ev_off_peak": { "rate_c_kwh": 4.72, "times": "00:00-06:00" }
         },
         "solar_fit_c_kwh": 1,
         "solar_fit_gst": "excl. GST"
       }
-    ]
+    ],
+    "cost_comparison_vs_agl": {
+      "plan_compared": "The Basic EV Plan (TOU)",
+      "methodology": "Same as the doc's Methodology section: supply_charge*365 + nightly_import_kwh*overnight_rate*365 - daily_export_kwh*feed_in_rate*365, since >95% of this site's import happens 00:00-06:00.",
+      "agl_inputs": { "supply_charge_c_per_day": 145.805, "overnight_rate_c_kwh": 8, "feed_in_c_kwh": 2 },
+      "ovo_inputs": { "supply_charge_c_per_day": 186.7404, "overnight_rate_c_kwh": 4.72, "feed_in_c_kwh": 1 },
+      "scenarios": [
+        { "name": "Observed telemetry", "nightly_import_kwh": 20.3, "daily_export_kwh": 2.4, "agl_annual": 1107, "ovo_annual": 1023, "saving_annual": -85 },
+        { "name": "Conservative", "nightly_import_kwh": 10, "daily_export_kwh": 2.4, "agl_annual": 807, "ovo_annual": 845, "saving_annual": 38 },
+        { "name": "Full household profile", "nightly_import_kwh": 25.11, "daily_export_kwh": 15.58, "agl_annual": 1152, "ovo_annual": 1057, "saving_annual": -94 }
+      ],
+      "breakeven_nightly_import_kwh": 13.21,
+      "note": "saving_annual is AGL minus OVO; negative means OVO is cheaper. Performs almost identically to 'The EV Plan' (breakeven 13.89 kWh) — within $1-11/yr in every scenario tested."
+    }
   }
 }

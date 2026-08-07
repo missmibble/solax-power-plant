@@ -335,7 +335,7 @@ function formatBatteryPower(status, watts) {
 
 function renderChart(data) {
   const ctx = document.getElementById('energyChart');
-  const labels = ['PV Yield', 'Grid Import', 'Grid Export'];
+  const labels = ['PV Yield', 'Grid Import', 'Grid Export (Previous Day)'];
   const values = [data.pvYieldKwh, data.importKwh, data.exportKwh];
 
   if (chart) {

@@ -72,11 +72,27 @@ OVO offers 6 tariff-structure variants of this one plan; you pick one at sign-up
 | The Basic EV Plan (TOU + CL2) | 186.7404 | 50.1732c | 26.5534c | 7.3227c | CL2: 17.5791c | 4.72c | 1c |
 | The Basic EV Plan (TOU) | 186.7404 | 50.1732c | 26.5534c | 7.3227c | — | 4.72c | 1c |
 
-**Caveat — clock-hour windows not available from this source**: OVO's pricing widget gives rate labels and values but not the peak/shoulder/off-peak/EV off-peak time boundaries. Each variant links to its own Energy Made Easy Basic Plan Information page (IDs in the JSON) where those hours are published — needed before this data can be used for the same overnight-window cost modelling the Methodology section below applies, since without confirmed hours it's not possible to tell whether "EV Off-Peak" (4.72c) actually covers this site's 00:00–06:00 battery-charge window the way "The EV Plan"'s off-peak (4.5c, confirmed 12:00am–5:59am) does.
+**Clock-hour windows — confirmed**: the TOU variant's periods are the same as AGL's (source: direct confirmation, not scraped) — `EV Off-Peak` 00:00–06:00, `Shoulder` 06:00–09:00 and 21:00–24:00, `Off-Peak` 09:00–16:00, `Peak` 16:00–21:00. This means `EV Off-Peak` (4.72c) covers this site's overnight battery-charge window in full, the same way "The EV Plan"'s off-peak (4.5c, 12:00am–5:59am) does.
 
-At a glance, this plan's EV off-peak rate (4.72c) is close to but slightly higher than "The EV Plan"'s confirmed 4.5c off-peak, and its TOU-variant supply charge (186.7404c/day) is slightly lower than "The EV Plan"'s 192.01c/day — worth a proper side-by-side once the window hours are confirmed, but not swapped into the recommendation below yet on that basis alone.
+### Cost comparison: AGL vs. OVO "The Basic EV Plan (TOU)"
 
-**Resolved**: the earlier discrepancy between this document's AGL supply charge and `config.tariff.dailySupplyCharge` is now settled — AGL's actual daily supply charge is **$1.45805/day (145.805c/day), effective 1 July 2026**. Both the config and the recommendation section below have been updated to match; see the "Recommendation" section for how this changes the OVO comparison (it narrows meaningfully — one scenario now flips in AGL's favor).
+Same methodology as "The EV Plan" above — supply charge + (nightly import × the plan's overnight-window rate) − (daily export × feed-in rate), since >95% of this site's import happens in the 00:00–06:00 window.
+
+| | AGL (current) | **OVO Basic EV Plan (TOU)** |
+|---|---|---|
+| Overnight rate (00:00–06:00) | 8c/kWh | **4.72c/kWh** |
+| Supply charge | 145.805c/day | 186.7404c/day |
+| Feed-in | 2c/kWh flat | 1c/kWh flat |
+
+| Scenario | AGL (current) | OVO Basic EV Plan (TOU) | Saving |
+|---|---|---|---|
+| Observed telemetry (~20.3 kWh/night import, ~2.4 kWh/day export) | $1,107/yr | **$1,023/yr** | **−$85/yr** |
+| Conservative (10 kWh/night import) | **$807/yr** | $845/yr | **+$38/yr (AGL cheaper)** |
+| Full household profile (25.11 kWh/day import, 15.58 kWh/day export) | $1,152/yr | **$1,057/yr** | **−$94/yr** |
+
+Breakeven: **13.21 kWh of nightly import** (vs. "The EV Plan"'s 13.89 kWh) — the observed ~20.3 kWh/night is ~1.54× that. Same pattern as "The EV Plan": wins on the two scenarios closer to actual usage, loses in the conservative one.
+
+**This plan and "The EV Plan" perform almost identically for this site** — within $1–11/yr of each other in every scenario tested, and Basic EV Plan (TOU) has a marginally lower breakeven. Neither is a clearly better pick on cost alone; whichever has better contract terms (not yet compared — see "Before switching" above) should decide between them.
 
 ## Full plan reference (sanitized)
 
