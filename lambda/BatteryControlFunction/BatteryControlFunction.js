@@ -38,12 +38,13 @@ spike) even after the battery has already stopped grid-charging for the night, s
 volume reflects both the battery and the EV together, not the battery's charge target alone.
 
 You are given yesterday's decision (forecast classification, the \
-reasoning, and the chargeUpperSoc percent that was set) and a summary of today's actual usage: PV yield, \
+reasoning, and the chargeUpperSoc percent that was set), a summary of today's actual usage: PV yield, \
 grid import/export broken down by tariff window (byWindow — so you can see *when* import/export happened, \
 e.g. the overnight night-ev-charge window vs. daytime vs. the evening peak-evening window, not just a single \
-whole-day total), and battery SOC range if available. Respond with ONLY a JSON object of the form \
-{"accurate": boolean, "assessment": string, "usageShouldInfluence": boolean, "usageNote": string} — no text \
-outside the JSON.
+whole-day total), and battery SOC range if available — plus the site's actual rates (feedInRate, and each \
+tariff window's import rate) so you can weigh this in dollars, not just kWh. Respond with ONLY a JSON object \
+of the form {"accurate": boolean, "assessment": string, "usageShouldInfluence": boolean, "usageNote": string} \
+— no text outside the JSON.
 
 "accurate": whether the chargeUpperSoc looks right in hindsight given what actually happened.
 "assessment": 1-2 plain-English sentences explaining the accuracy judgement — e.g. did the battery run flat \
@@ -52,7 +53,13 @@ any claim about *when* something happened in byWindow, not the daily total alone
 in night-ev-charge is expected overnight grid-charging, not daytime household load exceeding a full battery, \
 and only cite the latter if byWindow actually shows import during offpeak-midday/peak-evening/shoulder-morning. \
 Don't attribute all night-ev-charge import to the battery's target alone — some of it is likely the EV, \
-independent of whether chargeUpperSoc was right that night.
+independent of whether chargeUpperSoc was right that night. A battery that stayed full all day is only \
+actually a *bad* outcome in dollar terms if that grid charge wasn't repaid — weigh what the overnight charge \
+cost (chargeUpperSoc% worth of capacity at the night-ev-charge rate) against what it saved (peak-evening \
+import avoided by discharging then) and what it foregone in feed-in credit (feedInRate is typically far \
+below the peak rate, so a full battery avoiding peak import is usually still the right call even though it \
+exported less that day) — don't call a high target inaccurate just because it left the battery full and \
+export lower, only when the dollar comparison actually favors a lower target.
 "usageShouldInfluence": whether today's usage pattern (not just weather) suggests the charge target should \
 account for household load, independent of tomorrow's forecast.
 "usageNote": 1 sentence on what about today's usage drove that judgement, citing the specific window (e.g. \
@@ -285,6 +292,10 @@ async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
                 applied: previous.applied
             },
             todaysUsage: usageSummary,
+            rates: {
+                feedInRate: tariff.feedInRate,
+                importRates: (tariff.importRates || []).map(w => ({ label: w.label, rate: w.rate }))
+            },
             currency: tariff.currency
         });
 

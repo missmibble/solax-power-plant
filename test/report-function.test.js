@@ -113,13 +113,13 @@ describe('ReportFunction formatReport', () => {
         expect(report).toContain('no significant peak-window import detected');
     });
 
-    test('includes the window-by-window breakdown and currency', () => {
+    test('includes the window-by-window breakdown and currency, skipping windows with no import', () => {
         const assessment = assessUsage(readings, config.tariff);
         const report = formatReport(assessment, config.tariff, 1);
 
-        expect(report).toContain('Import by tariff window:');
         expect(report).toContain('shoulder-morning: 1 kWh @ 0.32384/kWh');
         expect(report).toContain('AUD');
+        expect(report).not.toContain('night-ev-charge: 0 kWh');
     });
 
     test('omits the battery line when no battery data is present', () => {

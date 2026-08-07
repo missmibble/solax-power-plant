@@ -270,41 +270,44 @@ function parseAiResponse(text) {
     };
 }
 
+// Dot-point email body — deliberately terser than the data actually available
+// (e.g. zero-import windows are skipped, the cost breakdown is one line not
+// three). recommendation()/aiInsights text itself is embedded verbatim, never
+// reworded here, since DashboardApiFunction serves those exact same strings
+// to the website via buildReportRecord — only this wrapper's formatting
+// differs between the two surfaces.
 function formatReport(assessment, tariff, lookbackDays, aiInsights) {
     const lines = [
         `PowerPlant usage report — last ${lookbackDays} day(s)`,
         '',
-        `PV yield: ${assessment.pvYieldKwh} kWh`,
-        `Grid export: ${assessment.exportKwh} kWh (credit: ${assessment.totalExportCredit} ${tariff.currency})`
+        `• PV yield: ${assessment.pvYieldKwh} kWh`,
+        `• Grid export: ${assessment.exportKwh} kWh (credit: ${assessment.totalExportCredit} ${tariff.currency})`
     ];
 
     if (typeof assessment.batteryChargeKwh === 'number') {
         lines.push(
-            `Battery: charged ${assessment.batteryChargeKwh} kWh, discharged ${assessment.batteryDischargeKwh} kWh, ` +
+            `• Battery: charged ${assessment.batteryChargeKwh} kWh, discharged ${assessment.batteryDischargeKwh} kWh, ` +
             `currently at ${assessment.currentBatterySOC}% SOC`
         );
     }
 
-    lines.push('', 'Import by tariff window:');
-
     for (const [label, w] of Object.entries(assessment.byWindow)) {
-        lines.push(`  ${label}: ${round2(w.importKwh)} kWh @ ${w.rate}/kWh = ${round2(w.cost)} ${tariff.currency}`);
+        if (w.importKwh <= 0) continue;
+        lines.push(`• Import — ${label}: ${round2(w.importKwh)} kWh @ ${w.rate}/kWh = ${round2(w.cost)} ${tariff.currency}`);
     }
 
-    lines.push('');
-    lines.push(`Total import cost: ${assessment.totalImportCost} ${tariff.currency}`);
-    lines.push(`Daily supply charge: ${assessment.supplyCharge} ${tariff.currency}`);
-    lines.push(`Net cost (import + supply charge - export credit): ${assessment.netCost} ${tariff.currency}`);
-    lines.push('');
-    lines.push(recommendation(assessment, tariff));
+    lines.push(
+        `• Net cost: ${assessment.netCost} ${tariff.currency} ` +
+        `(import ${assessment.totalImportCost} + supply ${assessment.supplyCharge} − export credit ${assessment.totalExportCredit})`
+    );
+
+    lines.push('', recommendation(assessment, tariff));
 
     if (aiInsights) {
-        lines.push('', 'AI insights:', `  ${aiInsights.narrative}`);
-        lines.push('', aiInsights.anomalies.length
-            ? 'Anomalies flagged:'
-            : 'Anomalies flagged: none');
+        lines.push('', 'AI insights:', `• ${aiInsights.narrative}`);
+        lines.push(aiInsights.anomalies.length ? 'Anomalies flagged:' : 'Anomalies flagged: none');
         for (const anomaly of aiInsights.anomalies) {
-            lines.push(`  - ${anomaly}`);
+            lines.push(`• ${anomaly}`);
         }
     }
 

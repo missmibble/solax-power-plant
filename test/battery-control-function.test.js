@@ -831,6 +831,52 @@ describe('BatteryControlFunction', () => {
             });
         });
 
+        test('passes feedInRate and per-window import rates to the model so it can weigh the $ tradeoff, not just kWh', async () => {
+            process.env.BEDROCK_MODEL_ID = 'anthropic.claude-3-5-haiku-20241022-v1:0';
+            process.env.TARIFF_STRUCTURE = JSON.stringify({
+                timezone: 'UTC',
+                feedInRate: 0.02,
+                importRates: [
+                    { label: 'night-ev-charge', startTime: '00:00', endTime: '06:00', rate: 0.08 },
+                    { label: 'peak-evening', startTime: '16:00', endTime: '21:00', rate: 0.41756 }
+                ]
+            });
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type === 'Query') {
+                    if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                        return Promise.resolve({
+                            Items: [{ Timestamp: 1000, classification: 'overcast', reasoning: 'rain', chargeUpperSoc: 100, applied: true }]
+                        });
+                    }
+                    return Promise.resolve({
+                        Items: [
+                            { Timestamp: 1000, totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5, batterySOC: 100 },
+                            { Timestamp: 2000, totalYield: 108, totalImportEnergy: 50, totalExportEnergy: 6, batterySOC: 100 }
+                        ]
+                    });
+                }
+                return Promise.resolve({});
+            });
+            ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
+
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(
+                '{"accurate": true, "assessment": "Full battery avoided peak import.", "usageShouldInfluence": false, "usageNote": ""}'
+            ));
+
+            await handler();
+
+            const invokeInput = mockBedrockSend.mock.calls[0][0].input;
+            const body = JSON.parse(invokeInput.body);
+            const promptData = JSON.parse(body.messages[0].content);
+            expect(promptData.rates.feedInRate).toBe(0.02);
+            expect(promptData.rates.importRates).toEqual([
+                { label: 'night-ev-charge', rate: 0.08 },
+                { label: 'peak-evening', rate: 0.41756 }
+            ]);
+        });
+
         test('omits previousAssessment when no model is configured', async () => {
             global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
 
