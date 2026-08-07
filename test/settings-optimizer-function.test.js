@@ -461,6 +461,57 @@ describe('SettingsOptimizerFunction', () => {
             expect(batteryPut.input.Item.sources.chargeUpperSocPartlyCloudy).toBe('settings-optimizer');
         });
 
+        test('autoApply run: a recommendation equal to the current value is not written or marked applied', async () => {
+            // Reproduces the real overnight bug: AI recommends chargeUpperSocOvercast=90
+            // and the current value is already 90 — nothing should change, and the
+            // record/email/sources should reflect that honestly instead of a no-op "applied".
+            process.env.SETTINGS_OPTIMIZER_CONFIG = JSON.stringify({ ...BASE_CONFIG, autoApply: true });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(validAiResponseText({
+                chargeUpperSocOvercast: 90, confidence: 'medium', reasoning: 'Overcast target of 90 already looks right.'
+            })));
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get' && command.input.Key.DeviceSn === `${BATTERY_SETTINGS_PREFIX}H34ABCDEFG5001`) {
+                    return Promise.resolve({
+                        Item: { chargeUpperSocOvercast: 90, sources: { chargeUpperSocOvercast: 'settings-optimizer' } }
+                    });
+                }
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type !== 'Query') return Promise.resolve({});
+                if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                    return Promise.resolve({
+                        Items: [
+                            { classification: 'overcast', previousAssessment: { accurate: true } },
+                            { classification: 'overcast', previousAssessment: { accurate: true } },
+                            { classification: 'overcast', previousAssessment: { accurate: true } }
+                        ]
+                    });
+                }
+                return Promise.resolve({ Items: [] });
+            });
+            ({ handler } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
+
+            await handler();
+
+            expect(findPutCalls().filter(c => c.input.Item.DeviceSn.includes('SETTINGS#'))).toHaveLength(0);
+
+            const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
+            expect(statusPut.input.Item.applied).toBe(false);
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Subject).not.toContain('applied');
+            expect(publishCall.input.Message).toContain('No changes recommended');
+        });
+
+        test('passes minSampleSize to the model so its reasoning can stay consistent with the code-enforced gate', async () => {
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            const invokeInput = mockBedrockSend.mock.calls[0][0].input;
+            const body = JSON.parse(invokeInput.body);
+            const promptData = JSON.parse(body.messages[0].content);
+            expect(promptData.minSampleSize).toBe(BASE_CONFIG.minSampleSize);
+        });
+
         test('failure: a Bedrock error publishes to the alerts topic and rethrows', async () => {
             mockBedrockSend.mockRejectedValue(new Error('Bedrock unavailable'));
 

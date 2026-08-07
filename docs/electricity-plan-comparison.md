@@ -27,9 +27,7 @@ Not itself listed in the 47-plan comparison (see "Known limitations" below) — 
 | Peak | 16:00–21:00 | 41.756c/kWh |
 | Shoulder (night) | 21:00–24:00 | 32.384c/kWh |
 | Feed-in | all day | 2c/kWh flat |
-| Supply charge | — | 168.927c/day |
-
-**No EV on site** — the discounted overnight window is used purely for the battery's scheduled grid charge (`BatteryControlFunction`), not vehicle charging.
+| Supply charge | — | 145.805c/day (effective 1 July 2026) |
 
 ## Recommendation: OVO Energy — "The EV Plan"
 
@@ -38,26 +36,47 @@ The deciding factor for this site isn't the headline plan-comparison numbers (wh
 | | AGL Night Saver EV (current) | **OVO The EV Plan** |
 |---|---|---|
 | Overnight rate (00:00–06:00) | 8c/kWh | **4.5c/kWh** |
-| Supply charge | 168.927c/day | 192.01c/day |
+| Supply charge | 145.805c/day (effective 1 July 2026) | 192.01c/day |
 | Feed-in | 2c/kWh flat | 1c/kWh flat |
 
 | Scenario | AGL (current) | OVO EV Plan | Saving |
 |---|---|---|---|
-| Observed telemetry (~20.3 kWh/night import, ~2.4 kWh/day export) | $1,192/yr | **$1,026/yr** | **−$166/yr** |
-| Conservative (10 kWh/night import) | $891/yr | $856/yr | −$35/yr |
-| Full household profile (25.11 kWh/day import, 15.58 kWh/day export) | $1,236/yr | **$1,056/yr** | **−$180/yr** |
+| Observed telemetry (~20.3 kWh/night import, ~2.4 kWh/day export) | $1,107/yr | **$1,026/yr** | **−$82/yr** |
+| Conservative (10 kWh/night import) | **$807/yr** | $856/yr | **+$50/yr (AGL cheaper)** |
+| Full household profile (25.11 kWh/day import, 15.58 kWh/day export) | $1,152/yr | **$1,056/yr** | **−$95/yr** |
 
-OVO wins in every scenario tested. The breakeven point — where it stops being cheaper — is **7.3 kWh of nightly import**; the real system pulls roughly 2.8× that, so the result is robust to the usage uncertainty. Also branded for EV owners but works identically here, same as the current plan.
+AGL's supply charge dropped to 145.805c/day effective 1 July 2026 (was 168.927c/day when this comparison was first run), which materially narrows the case for switching. OVO still wins on the two scenarios closer to this site's actual usage pattern, but the **conservative scenario now flips in AGL's favor** — it no longer wins in every scenario tested. The breakeven point — the nightly import above which OVO becomes cheaper — moved from 7.3 kWh to **13.89 kWh of nightly import**; the real system's observed ~20.3 kWh/night is only **~1.46×** that (was ~2.8×), so the margin of safety against usage variance is much thinner than it was. Worth re-confirming against a longer telemetry sample before switching on this basis. Also branded for EV owners but works identically here, same as the current plan.
 
 **Before switching**: confirm OVO's actual contract terms (the source listing notes "1 condition, 2 special offers" not detailed in the plan data) and that AGL Night Saver EV — which no longer appears in new-customer listings, see below — can't be re-joined later if that matters.
 
 ### Why the other 45 plans don't compete
 
-- **Dodo Residential Standing (TOU)** has a good overnight rate (6.98c, wider 10pm–7am window) but a $222.61/day supply charge (+$196/yr vs AGL) erases the advantage — $129–159/yr *worse* than AGL, not better.
+- **Dodo Residential Standing (TOU)** has a good overnight rate (6.98c, wider 10pm–7am window) but a $222.61/day supply charge (+$280/yr vs AGL's corrected 145.805c/day) erases the advantage — $214–244/yr *worse* than AGL, not better.
 - **Every other time-of-use plan** in the comparison defines its cheapest window as mid-morning-to-afternoon (typically 9/11am–4pm) rather than overnight — exactly when this site needs the grid least, since solar already covers it. Their actual overnight rate (usually labeled "shoulder") runs 19–29c/kWh, 2.5–3.5× AGL's night rate.
 - **Single-rate plans** can't compete structurally — a flat 13–32c/kWh rate always loses to 8c (or 4.5c) applied to >95% of usage. The one exception worth naming: **Amber Electric's variable-wholesale plan** (13.29c indicative usage rate, +6.93c average feed-in) — real-time wholesale pricing is often cheap overnight, but it's a genuinely variable rate rather than a fixed guarantee, so it wasn't scored numerically here.
 - **CovaU SolarMax** offers 15c/kWh feed-in specifically for 6–9pm exports — this was the window a `GridDischargeFunction` grid-export arbitrage feature targeted, since removed once that premium feed-in opportunity was confirmed unavailable for this account's actual plan. Not competitive on its own merits either way — 16.5c overnight rate is double AGL's.
 - **AGL Night Saver EV itself doesn't appear in the 47-plan comparison** — only two unrelated AGL Seniors Saver plans do, suggesting it may be closed to new customers and the site is on a grandfathered rate.
+
+## OVO Energy — "The Basic EV Plan" (direct from OVO, QLD/Residential/Post-paid/Energex)
+
+Pulled directly from OVO's own pricing page (`pages.ovoenergy.com.au/pricing`) on 2026-08-07, filtered to QLD, Residential, Post-paid, Energex — **not** from the Energy Made Easy comparison the rest of this document is sourced from, and **not the same plan** as "The EV Plan" already listed below (`OVO723742MRE20`). Structured data: [electricity-plan-comparison.json](electricity-plan-comparison.json)'s `ovo_basic_ev_plan_direct` key.
+
+OVO offers 6 tariff-structure variants of this one plan; you pick one at sign-up. All rates GST-inclusive except Solar FiT (excl. GST, per OVO's own footnote):
+
+| Variant | Supply (c/day) | Peak | Shoulder | Off-Peak | Controlled Load | EV Off-Peak | Solar FiT |
+|---|---|---|---|---|---|---|---|
+| The Basic EV Plan | 201.6052 | 29.3716c | — | — | — | 4.72c | 1c |
+| The Basic EV Plan (CL1) | 201.6052 | 29.3716c | — | — | CL1: 17.2441c | 4.72c | 1c |
+| The Basic EV Plan (CL2) | 201.6052 | 29.3716c | — | — | CL2: 17.5791c | 4.72c | 1c |
+| The Basic EV Plan (TOU + CL1) | 186.7404 | 50.1732c | 26.5534c | 7.3227c | CL1: 17.2441c | 4.72c | 1c |
+| The Basic EV Plan (TOU + CL2) | 186.7404 | 50.1732c | 26.5534c | 7.3227c | CL2: 17.5791c | 4.72c | 1c |
+| The Basic EV Plan (TOU) | 186.7404 | 50.1732c | 26.5534c | 7.3227c | — | 4.72c | 1c |
+
+**Caveat — clock-hour windows not available from this source**: OVO's pricing widget gives rate labels and values but not the peak/shoulder/off-peak/EV off-peak time boundaries. Each variant links to its own Energy Made Easy Basic Plan Information page (IDs in the JSON) where those hours are published — needed before this data can be used for the same overnight-window cost modelling the Methodology section below applies, since without confirmed hours it's not possible to tell whether "EV Off-Peak" (4.72c) actually covers this site's 00:00–06:00 battery-charge window the way "The EV Plan"'s off-peak (4.5c, confirmed 12:00am–5:59am) does.
+
+At a glance, this plan's EV off-peak rate (4.72c) is close to but slightly higher than "The EV Plan"'s confirmed 4.5c off-peak, and its TOU-variant supply charge (186.7404c/day) is slightly lower than "The EV Plan"'s 192.01c/day — worth a proper side-by-side once the window hours are confirmed, but not swapped into the recommendation below yet on that basis alone.
+
+**Resolved**: the earlier discrepancy between this document's AGL supply charge and `config.tariff.dailySupplyCharge` is now settled — AGL's actual daily supply charge is **$1.45805/day (145.805c/day), effective 1 July 2026**. Both the config and the recommendation section below have been updated to match; see the "Recommendation" section for how this changes the OVO comparison (it narrows meaningfully — one scenario now flips in AGL's favor).
 
 ## Full plan reference (sanitized)
 

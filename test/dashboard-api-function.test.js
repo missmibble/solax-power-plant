@@ -57,9 +57,25 @@ describe('DashboardApiFunction aggregateReadings', () => {
         expect(rollup.exportCredit).toBeCloseTo(0.02, 2);
     });
 
-    test('nets import cost against export credit', () => {
+    test('nets import cost plus the daily supply charge against export credit', () => {
         const rollup = aggregateReadings(readings, config.tariff);
-        expect(rollup.netCost).toBeCloseTo(1.14, 2);
+        // 1.15896 import cost + 1.45805 supply charge (all readings fall within a single
+        // local calendar day) - 0.02 export credit
+        expect(rollup.netCost).toBeCloseTo(2.60, 2);
+    });
+
+    test('applies the daily supply charge once for a period within a single local day', () => {
+        const rollup = aggregateReadings(readings, config.tariff);
+        expect(rollup.supplyCharge).toBeCloseTo(1.45805, 2);
+    });
+
+    test('applies the daily supply charge once per local calendar day spanned', () => {
+        const readingsAcrossTwoDays = [
+            readings[0],
+            { ...readings[2], Timestamp: readings[2].Timestamp + 24 * 60 * 60 }
+        ];
+        const rollup = aggregateReadings(readingsAcrossTwoDays, config.tariff);
+        expect(rollup.supplyCharge).toBeCloseTo(2 * 1.45805, 2);
     });
 
     test('ignores negative deltas (counter resets) when pricing import', () => {
@@ -288,7 +304,58 @@ describe('DashboardApiFunction formatBatteryStatusResponse', () => {
             applied: false,
             enabled: true,
             appliesToDate: '2026-08-01',
-            previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' }
+            previousAssessment: { accurate: true, assessment: 'Fine.', usageShouldInfluence: false, usageNote: '' },
+            discharge: { applied: false }
+        });
+    });
+
+    test('reports discharge: {applied: false} when no surplus discharge was engaged that night', () => {
+        const item = { Timestamp: 1785400000, classification: 'sunny', chargeUpperSoc: 40, dryRun: true, applied: false };
+        expect(formatBatteryStatusResponse(item).discharge).toEqual({ applied: false });
+    });
+
+    test('shapes discharge details, including the measured kWh and feed-in credit, when a surplus discharge was engaged', () => {
+        const item = {
+            Timestamp: 1785400000,
+            classification: 'overcast',
+            chargeUpperSoc: 60,
+            dryRun: false,
+            applied: false,
+            dischargeApplied: true,
+            dischargeSurplusPercent: 12,
+            dischargeExitApplied: true
+        };
+        const dischargeSummary = { dischargeKwh: 2.5, feedInCredit: 0.05, currency: 'AUD' };
+
+        expect(formatBatteryStatusResponse(item, null, dischargeSummary).discharge).toEqual({
+            applied: true,
+            exitApplied: true,
+            surplusPercent: 12,
+            dischargeKwh: 2.5,
+            feedInCredit: 0.05,
+            currency: 'AUD'
+        });
+    });
+
+    test('discharge kWh/credit fall back to null when the readings-based computation found nothing usable', () => {
+        const item = {
+            Timestamp: 1785400000,
+            classification: 'overcast',
+            chargeUpperSoc: 60,
+            dryRun: false,
+            applied: false,
+            dischargeApplied: true,
+            dischargeSurplusPercent: 12,
+            dischargeExitApplied: false
+        };
+
+        expect(formatBatteryStatusResponse(item, null, null).discharge).toEqual({
+            applied: true,
+            exitApplied: false,
+            surplusPercent: 12,
+            dischargeKwh: null,
+            feedInCredit: null,
+            currency: null
         });
     });
 

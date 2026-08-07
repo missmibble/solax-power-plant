@@ -31,9 +31,10 @@ chargeUpperSocSunny / chargeUpperSocPartlyCloudy / chargeUpperSocOvercast — ho
 overnight based on tomorrow's weather forecast (a lower sunny target relies on solar catching up during the \
 day; partly-cloudy is the ambiguous-forecast middle ground between sunny and overcast).
 
-You are given the current effective value of each setting, and a summary of recent history: per-classification \
-accuracy judgements already made by another automated nightly assessment (was the target right in hindsight, \
-and did household usage suggest it should change).
+You are given the current effective value of each setting, the number of sample nights behind each one, the \
+minSampleSize threshold below which a change can never actually be applied regardless of what you recommend, \
+and a summary of recent history: per-classification accuracy judgements already made by another automated \
+nightly assessment (was the target right in hindsight, and did household usage suggest it should change).
 
 Respond with ONLY a JSON object of this exact form — no text outside the JSON:
 {"chargeUpperSocSunny": number|null, "chargeUpperSocPartlyCloudy": number|null, "chargeUpperSocOvercast": number|null, \
@@ -43,7 +44,14 @@ Use null for any value you don't have enough evidence to recommend changing — 
 effect. Never recommend a value that would leave less safety margin than the household's single worst night \
 in the sample actually needed: the cost of erring toward holding more charge is a small amount of missed \
 export revenue or a slightly fuller morning battery; the cost of erring toward too little is a forced grid \
-import at the most expensive rate of the day.`;
+import at the most expensive rate of the day.
+
+Critical: for any setting whose sample size is below minSampleSize, you MUST return null for it — a lower \
+sample size means the change can never actually be applied no matter what number you return, so a non-null \
+value there is simply discarded. Your reasoning text must match what you actually return: do not describe or \
+suggest a specific new percentage for a setting you returned null for, since that number will never take \
+effect and only misleads whoever reads the reasoning. For those settings, explain that you're holding at the \
+current value for lack of data instead.`;
 
 async function queryRecentRecords(prefix, deviceSn, sinceSeconds) {
     const items = [];
@@ -113,8 +121,8 @@ function parseOptimizationRecommendation(text) {
     };
 }
 
-async function getRecommendation(modelId, currentValues, batterySummary) {
-    const prompt = JSON.stringify({ currentValues, batteryControlHistory: batterySummary });
+async function getRecommendation(modelId, currentValues, batterySummary, minSampleSize) {
+    const prompt = JSON.stringify({ currentValues, batteryControlHistory: batterySummary, minSampleSize });
 
     const response = await bedrockClient.send(new InvokeModelCommand({
         modelId,
@@ -185,7 +193,7 @@ const SETTING_LABELS = {
 
 function formatMessage(recommendations, aiRecommendation, autoApply) {
     const lines = [];
-    const changed = Object.entries(recommendations).filter(([, r]) => r.recommended !== null);
+    const changed = Object.entries(recommendations).filter(([, r]) => r.recommended !== null && r.recommended !== r.current);
 
     if (changed.length === 0) {
         lines.push('No changes recommended this week — either not enough sample nights yet, or current values look right.');
@@ -248,14 +256,10 @@ function mergedSources(existingSources, updatedKeys) {
 // or a not-recommended-this-week field already saved there isn't clobbered.
 async function applyRecommendations(deviceSn, recommendations, existingBatteryOverride) {
     const batteryUpdate = {};
-    if (recommendations.chargeUpperSocSunny.recommended !== null) {
-        batteryUpdate.chargeUpperSocSunny = recommendations.chargeUpperSocSunny.recommended;
-    }
-    if (recommendations.chargeUpperSocPartlyCloudy.recommended !== null) {
-        batteryUpdate.chargeUpperSocPartlyCloudy = recommendations.chargeUpperSocPartlyCloudy.recommended;
-    }
-    if (recommendations.chargeUpperSocOvercast.recommended !== null) {
-        batteryUpdate.chargeUpperSocOvercast = recommendations.chargeUpperSocOvercast.recommended;
+    for (const [key, r] of Object.entries(recommendations)) {
+        if (r.recommended !== null && r.recommended !== r.current) {
+            batteryUpdate[key] = r.recommended;
+        }
     }
     if (Object.keys(batteryUpdate).length === 0) return false;
 
@@ -314,7 +318,7 @@ exports.handler = async () => {
         // (but successfully returned) response still degrades gracefully to
         // "no recommendation" via parseOptimizationRecommendation, same as
         // parseAiResponse/parseAccuracyAssessment elsewhere.
-        const aiRecommendation = await getRecommendation(modelId, currentValues, batterySummary);
+        const aiRecommendation = await getRecommendation(modelId, currentValues, batterySummary, config.minSampleSize);
 
         const recommendations = buildRecommendations({
             currentValues, batterySummary, aiRecommendation,

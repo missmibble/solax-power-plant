@@ -44,6 +44,8 @@ When SOC data is available for the peak window, further distinguishes "already d
 
 ## BatteryControlFunction — overnight charge target
 
+**Evaluation order each night** (full detail: battery-charge-logic.md's "Order of assessment — decide" and "— exitDischarge"): settings resolved → previous night assessed (informational only) → `enabled` branches to either the disabled default or a forecast classification → the resulting target is compared against current SOC for a surplus → dry-run-gated apply (either Self Use mode immediately, or a deferred VPP discharge) → decision persisted → *(separately, ~2h25m later)* control handed back if a discharge happened.
+
 | Rule | Value |
 |---|---|
 | Forecast classification | Tomorrow's Open-Meteo hourly slots → `sunny`, `partly-cloudy`, or `overcast` |
@@ -55,7 +57,10 @@ When SOC data is available for the peak window, further distinguishes "already d
 | Charge-from-grid | Enabled, window **00:00–06:00** (not dashboard-editable) |
 | Enabled toggle **[editable]** | `enabled` = **true** — `false` skips forecasting and holds `disabledChargeUpperSoc` every night |
 | Control mode **[editable]** | `dryRun` = **true** — logs/emails only, never calls SolaX. Dashboard toggle (red pill, confirm-gated) flips this with no redeploy |
-| Schedule | **cron(30 11 \* \* ? \*)** = 21:30 Brisbane |
+| Decide schedule | **cron(0 11 \* \* ? \*)** = 21:00 Brisbane — decides `chargeUpperSoc` and checks for surplus discharge |
+| Exit-discharge schedule | **cron(55 13 \* \* ? \*)** = 23:55 Brisbane — no-op unless a discharge was engaged that evening; hands control back before the 00:00 charge window |
+| Surplus discharge trigger | Current SOC exceeds tonight's `chargeUpperSoc` by ≥ `minSurplusPercent` = **5 points** (not dashboard-editable) |
+| Surplus discharge rate | `maxDischargePowerW` = **3000 W** (not dashboard-editable) |
 
 ## SettingsOptimizerFunction — self-tuning bounds
 

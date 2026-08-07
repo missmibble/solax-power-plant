@@ -225,6 +225,12 @@ main {
   margin-bottom: 0;
 }
 
+.panel-note {
+  font-size: 0.8rem;
+  color: #888;
+  margin: 0 0 0.75rem;
+}
+
 .widgets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

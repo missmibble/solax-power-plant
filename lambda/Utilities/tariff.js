@@ -4,7 +4,7 @@
  * Tariff window matching + cost calculation — shared by DashboardApiFunction,
  * AlertFunction, and ReportFunction. Expects the config.tariff shape (see
  * docs/PowerPlant_Project_Brief.md / TARIFF_STRUCTURE env var):
- *   { currency, timezone, importRates: [{ label, startTime, endTime, rate }], feedInRate }
+ *   { currency, timezone, importRates: [{ label, startTime, endTime, rate }], feedInRate, dailySupplyCharge }
  *
  * `timezone` must be an IANA zone (e.g. "Australia/Sydney") — time-of-day
  * windows are meaningless without converting the UTC reading timestamp to
@@ -51,6 +51,22 @@ function exportCredit(tariff, kwh) {
     return kwh * (tariff.feedInRate || 0);
 }
 
+// A fixed per-day charge applies regardless of usage — unlike importRates/
+// feedInRate this isn't derived from consumption deltas at all, just the
+// number of local calendar days the [fromTimestampSeconds, toTimestampSeconds]
+// period actually spans (inclusive of both ends, so a same-day range still
+// counts as 1 day, not 0). Callers pass the first/last reading's Timestamp,
+// the same pair every other per-period cost figure is already derived from.
+function supplyChargeForPeriod(tariff, fromTimestampSeconds, toTimestampSeconds) {
+    if (!tariff.dailySupplyCharge) return 0;
+
+    const fromDate = localDateString(fromTimestampSeconds, tariff.timezone);
+    const toDate = localDateString(toTimestampSeconds, tariff.timezone);
+    const diffDays = Math.round((Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`)) / 86_400_000);
+
+    return (diffDays + 1) * tariff.dailySupplyCharge;
+}
+
 // Sortable YYYY-MM-DD in local time — used to bucket readings into calendar
 // days (e.g. ReportFunction's multi-day history summary for AI insights).
 function localDateString(timestampSeconds, timezone) {
@@ -87,4 +103,6 @@ function startOfLocalDay(timestampSeconds, timezone) {
     return timestampSeconds - secondsSinceMidnight;
 }
 
-module.exports = { findImportRateWindow, importCostForWindow, exportCredit, localDateString, startOfLocalDay };
+module.exports = {
+    findImportRateWindow, importCostForWindow, exportCredit, supplyChargeForPeriod, localDateString, startOfLocalDay
+};

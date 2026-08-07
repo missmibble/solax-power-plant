@@ -1225,5 +1225,103 @@
       },
       "meter_type_required": "All meter types"
     }
-  ]
+  ],
+  "ovo_basic_ev_plan_direct": {
+    "source": "OVO Energy official pricing page (not Energy Made Easy) — retailer-embedded per-state/network/plan blocks, extracted by DOM id rather than the page's client-side selector, since no interactive browser was available in this environment",
+    "source_url": "https://pages.ovoenergy.com.au/pricing",
+    "retrieved": "2026-08-07",
+    "filters_applied": {
+      "state": "QLD",
+      "customer_type": "Residential",
+      "payment_type": "Post-paid",
+      "plan": "The Basic EV Plan",
+      "distributor": "Energex"
+    },
+    "note": "A different OVO plan from 'The EV Plan' already listed above (OVO723742MRE20, sourced from Energy Made Easy on 2026-08-02) — do not conflate the two. All rates below are GST-inclusive except Solar FiT, which the source page marks excl. GST.",
+    "caveat": "The source widget gives rate labels and c/kWh values only, not the clock-hour boundaries for peak/shoulder/off-peak/EV off-peak — those live on each variant's linked Energy Made Easy Basic Plan Information page (id given per variant below). Do not use this data for overnight-window cost modelling until those hours are confirmed.",
+    "variants": [
+      {
+        "variant_name": "The Basic EV Plan",
+        "energy_made_easy_plan_id": "OVO723796MRE",
+        "structure": "single rate + EV off-peak",
+        "supply_charge_c_per_day": 201.6052,
+        "rates": {
+          "peak": { "rate_c_kwh": 29.3716 },
+          "ev_off_peak": { "rate_c_kwh": 4.72 }
+        },
+        "solar_fit_c_kwh": 1,
+        "solar_fit_gst": "excl. GST"
+      },
+      {
+        "variant_name": "The Basic EV Plan (CL1)",
+        "energy_made_easy_plan_id": "OVO723764MRE",
+        "structure": "single rate + controlled load 1 + EV off-peak",
+        "supply_charge_c_per_day": 201.6052,
+        "rates": {
+          "peak": { "rate_c_kwh": 29.3716 },
+          "controlled_load_1": { "rate_c_kwh": 17.2441 },
+          "ev_off_peak": { "rate_c_kwh": 4.72 }
+        },
+        "solar_fit_c_kwh": 1,
+        "solar_fit_gst": "excl. GST"
+      },
+      {
+        "variant_name": "The Basic EV Plan (CL2)",
+        "energy_made_easy_plan_id": "OVO723771MRE",
+        "structure": "single rate + controlled load 2 + EV off-peak",
+        "supply_charge_c_per_day": 201.6052,
+        "rates": {
+          "peak": { "rate_c_kwh": 29.3716 },
+          "controlled_load_2": { "rate_c_kwh": 17.5791 },
+          "ev_off_peak": { "rate_c_kwh": 4.72 }
+        },
+        "solar_fit_c_kwh": 1,
+        "solar_fit_gst": "excl. GST"
+      },
+      {
+        "variant_name": "The Basic EV Plan (TOU + CL1)",
+        "energy_made_easy_plan_id": "OVO723794MRE",
+        "structure": "time-of-use + controlled load 1 + EV off-peak",
+        "supply_charge_c_per_day": 186.7404,
+        "rates": {
+          "peak": { "rate_c_kwh": 50.1732 },
+          "shoulder": { "rate_c_kwh": 26.5534 },
+          "off_peak": { "rate_c_kwh": 7.3227 },
+          "controlled_load_1": { "rate_c_kwh": 17.2441 },
+          "ev_off_peak": { "rate_c_kwh": 4.72 }
+        },
+        "solar_fit_c_kwh": 1,
+        "solar_fit_gst": "excl. GST"
+      },
+      {
+        "variant_name": "The Basic EV Plan (TOU + CL2)",
+        "energy_made_easy_plan_id": "OVO723813MRE",
+        "structure": "time-of-use + controlled load 2 + EV off-peak",
+        "supply_charge_c_per_day": 186.7404,
+        "rates": {
+          "peak": { "rate_c_kwh": 50.1732 },
+          "shoulder": { "rate_c_kwh": 26.5534 },
+          "off_peak": { "rate_c_kwh": 7.3227 },
+          "controlled_load_2": { "rate_c_kwh": 17.5791 },
+          "ev_off_peak": { "rate_c_kwh": 4.72 }
+        },
+        "solar_fit_c_kwh": 1,
+        "solar_fit_gst": "excl. GST"
+      },
+      {
+        "variant_name": "The Basic EV Plan (TOU)",
+        "energy_made_easy_plan_id": "OVO723751MRE",
+        "structure": "time-of-use + EV off-peak, no controlled load",
+        "supply_charge_c_per_day": 186.7404,
+        "rates": {
+          "peak": { "rate_c_kwh": 50.1732 },
+          "shoulder": { "rate_c_kwh": 26.5534 },
+          "off_peak": { "rate_c_kwh": 7.3227 },
+          "ev_off_peak": { "rate_c_kwh": 4.72 }
+        },
+        "solar_fit_c_kwh": 1,
+        "solar_fit_gst": "excl. GST"
+      }
+    ]
+  }
 }

@@ -6,7 +6,8 @@ function jsonResponse(body) {
 
 describe('solax-client', () => {
     const baseUrl = 'https://openapi-eu.solaxcloud.com';
-    let BUSINESS_TYPE, DEVICE_TYPE, getAccessToken, getDeviceRealtimeData, getAlarmInfo, setInverterSelfUseMode;
+    let BUSINESS_TYPE, DEVICE_TYPE, getAccessToken, getDeviceRealtimeData, getAlarmInfo, setInverterSelfUseMode,
+        setInverterSocTargetMode, exitVppMode;
 
     beforeEach(() => {
         global.fetch = jest.fn();
@@ -14,7 +15,8 @@ describe('solax-client', () => {
         // and each test should start from an empty cache.
         jest.resetModules();
         ({
-            BUSINESS_TYPE, DEVICE_TYPE, getAccessToken, getDeviceRealtimeData, getAlarmInfo, setInverterSelfUseMode
+            BUSINESS_TYPE, DEVICE_TYPE, getAccessToken, getDeviceRealtimeData, getAlarmInfo, setInverterSelfUseMode,
+            setInverterSocTargetMode, exitVppMode
         } = require('../lambda/Utilities/solax-client'));
     });
 
@@ -178,4 +180,81 @@ describe('solax-client', () => {
         });
     });
 
+    describe('setInverterSocTargetMode', () => {
+        test('POSTs targetSoc and chargeDischargPower to soc_target_control_mode', async () => {
+            global.fetch.mockResolvedValue(jsonResponse({
+                code: 0,
+                result: { 'H34ABCDEFG5001': { status: 4 } },
+                requestId: 'req-vpp-1'
+            }));
+
+            const result = await setInverterSocTargetMode(baseUrl, 'my-token', {
+                snList: 'H34ABCDEFG5001',
+                businessType: BUSINESS_TYPE.RESIDENTIAL,
+                targetSoc: 40,
+                chargeDischargPower: -3000
+            });
+
+            expect(result).toEqual({ 'H34ABCDEFG5001': { status: 4 } });
+
+            const [url, options] = global.fetch.mock.calls[0];
+            expect(url.toString()).toContain('/openapi/v2/device/inverter_vpp_mode/soc_target_control_mode');
+            expect(options.method).toBe('POST');
+            expect(options.headers.Authorization).toBe('bearer my-token');
+
+            const body = JSON.parse(options.body);
+            expect(body.snList).toEqual(['H34ABCDEFG5001']);
+            expect(body.targetSoc).toBe(40);
+            expect(body.chargeDischargPower).toBe(-3000); // negative = discharge
+        });
+
+        test('wraps a single snList string in an array for the JSON body', async () => {
+            global.fetch.mockResolvedValue(jsonResponse({ code: 0, result: {}, requestId: 'req-vpp-2' }));
+
+            await setInverterSocTargetMode(baseUrl, 'my-token', {
+                snList: 'H34ABCDEFG5001',
+                businessType: BUSINESS_TYPE.RESIDENTIAL,
+                targetSoc: 40,
+                chargeDischargPower: -3000
+            });
+
+            const [, options] = global.fetch.mock.calls[0];
+            expect(JSON.parse(options.body).snList).toEqual(['H34ABCDEFG5001']);
+        });
+
+        test('throws with the requestId when the API returns an error code', async () => {
+            global.fetch.mockResolvedValue(jsonResponse({ code: 4010, message: 'invalid targetSoc', requestId: 'req-vpp-3' }));
+
+            await expect(
+                setInverterSocTargetMode(baseUrl, 'my-token', {
+                    snList: 'H34ABCDEFG5001',
+                    businessType: BUSINESS_TYPE.RESIDENTIAL,
+                    targetSoc: 40,
+                    chargeDischargPower: -3000
+                })
+            ).rejects.toThrow(/req-vpp-3/);
+        });
+    });
+
+    describe('exitVppMode', () => {
+        test('POSTs snList/businessType only to exit_vpp_mode', async () => {
+            global.fetch.mockResolvedValue(jsonResponse({
+                code: 0,
+                result: { 'H34ABCDEFG5001': { status: 4 } },
+                requestId: 'req-exit-1'
+            }));
+
+            const result = await exitVppMode(baseUrl, 'my-token', {
+                snList: 'H34ABCDEFG5001',
+                businessType: BUSINESS_TYPE.RESIDENTIAL
+            });
+
+            expect(result).toEqual({ 'H34ABCDEFG5001': { status: 4 } });
+
+            const [url, options] = global.fetch.mock.calls[0];
+            expect(url.toString()).toContain('/openapi/v2/device/inverter_vpp_mode/exit_vpp_mode');
+            const body = JSON.parse(options.body);
+            expect(body).toEqual({ snList: ['H34ABCDEFG5001'], businessType: BUSINESS_TYPE.RESIDENTIAL });
+        });
+    });
 });

@@ -74,7 +74,8 @@
       { "label": "peak-evening", "startTime": "16:00", "endTime": "21:00", "rate": 0.41756 },
       { "label": "shoulder-night", "startTime": "21:00", "endTime": "24:00", "rate": 0.32384 }
     ],
-    "feedInRate": 0.02
+    "feedInRate": 0.02,
+    "dailySupplyCharge": 1.45805
   },
   "bedrock": {
     "modelId": "TODO_BEDROCK_MODEL_ID",
@@ -99,7 +100,9 @@
     "dischargeEndTimePeriod1": "23:59",
     "dischargeStartTimePeriod2": "00:00",
     "dischargeEndTimePeriod2": "00:00",
-    "enableTimePeriod2": 0
+    "enableTimePeriod2": 0,
+    "minSurplusPercent": 5,
+    "maxDischargePowerW": 3000
   },
   "settingsOptimizer": {
     "enabled": true,
@@ -155,10 +158,11 @@
     "batteryControlFunction": {
       "functionName": "BatteryControlFunction",
       "cfResource": "PowerPlantBatteryControlFunction",
-      "description": "Checks tomorrow's weather forecast and adjusts the inverter's grid-charge target (chargeUpperSoc) accordingly; dry-run by default",
+      "description": "Checks tomorrow's weather forecast and adjusts the inverter's grid-charge target (chargeUpperSoc) accordingly; also discharges surplus SOC above tonight's target before the overnight window; dry-run by default",
       "assetPath": "lambda/BatteryControlFunction",
       "timer": 30,
-      "schedule": "cron(30 11 * * ? *)"
+      "schedule": "cron(0 11 * * ? *)",
+      "exitDischargeSchedule": "cron(55 13 * * ? *)"
     },
     "settingsOptimizerFunction": {
       "functionName": "SettingsOptimizerFunction",

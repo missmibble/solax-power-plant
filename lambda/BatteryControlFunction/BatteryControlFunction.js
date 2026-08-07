@@ -11,6 +11,8 @@ const {
     BUSINESS_TYPE,
     getAccessToken,
     setInverterSelfUseMode,
+    setInverterSocTargetMode,
+    exitVppMode,
     localDateString,
     findImportRateWindow,
     fetchTomorrowForecast
@@ -29,7 +31,13 @@ const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0; // fixed sort key — one settings row per inverter, not time-series
 
 const ACCURACY_SYSTEM_PROMPT = `You are reviewing a home battery charge-control decision made yesterday \
-evening for a solar + battery system. You are given yesterday's decision (forecast classification, the \
+evening for a solar + battery system. The household also owns an electric vehicle that is often plugged in \
+to charge overnight, in the same 00:00-06:00 night-ev-charge window the battery itself grid-charges in — EV \
+charging draws from the grid independently of the battery's chargeUpperSoc decision, and can continue (or \
+spike) even after the battery has already stopped grid-charging for the night, so night-ev-charge import \
+volume reflects both the battery and the EV together, not the battery's charge target alone.
+
+You are given yesterday's decision (forecast classification, the \
 reasoning, and the chargeUpperSoc percent that was set) and a summary of today's actual usage: PV yield, \
 grid import/export broken down by tariff window (byWindow — so you can see *when* import/export happened, \
 e.g. the overnight night-ev-charge window vs. daytime vs. the evening peak-evening window, not just a single \
@@ -42,7 +50,9 @@ outside the JSON.
 before solar caught up (target was too low), or stay needlessly full all day (target was too high)? Ground \
 any claim about *when* something happened in byWindow, not the daily total alone — e.g. import concentrated \
 in night-ev-charge is expected overnight grid-charging, not daytime household load exceeding a full battery, \
-and only cite the latter if byWindow actually shows import during offpeak-midday/peak-evening/shoulder-morning.
+and only cite the latter if byWindow actually shows import during offpeak-midday/peak-evening/shoulder-morning. \
+Don't attribute all night-ev-charge import to the battery's target alone — some of it is likely the EV, \
+independent of whether chargeUpperSoc was right that night.
 "usageShouldInfluence": whether today's usage pattern (not just weather) suggests the charge target should \
 account for household load, independent of tomorrow's forecast.
 "usageNote": 1 sentence on what about today's usage drove that judgement, citing the specific window (e.g. \
@@ -96,27 +106,27 @@ function classifyForecast(slots) {
         return { classification: 'overcast', reasoning: 'No forecast data for tomorrow — defaulting to safe/conservative.' };
     }
 
-    const maxPop = Math.max(...slots.map(s => s.precipitationProbability || 0));
+    const maxRainChance = Math.max(...slots.map(s => s.precipitationProbability || 0));
     const avgClouds = slots.reduce((sum, s) => sum + (s.cloudCoverPercent || 0), 0) / slots.length;
     const hasRainCondition = slots.some(s => s.isRainy);
 
-    if (hasRainCondition || maxPop >= 0.4 || avgClouds >= 70) {
+    if (hasRainCondition || maxRainChance >= 0.4 || avgClouds >= 70) {
         return {
             classification: 'overcast',
-            reasoning: `hasRainCondition=${hasRainCondition}, maxPop=${maxPop.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%`
+            reasoning: `hasRainCondition=${hasRainCondition}, maxRainChance=${maxRainChance.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%`
         };
     }
 
-    if (avgClouds <= 30 && maxPop < 0.2) {
+    if (avgClouds <= 30 && maxRainChance < 0.2) {
         return {
             classification: 'sunny',
-            reasoning: `maxPop=${maxPop.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%`
+            reasoning: `maxRainChance=${maxRainChance.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%`
         };
     }
 
     return {
         classification: 'partly-cloudy',
-        reasoning: `Ambiguous forecast (maxPop=${maxPop.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%) — moderate charge target rather than defaulting to full.`
+        reasoning: `Ambiguous forecast (maxRainChance=${maxRainChance.toFixed(2)}, avgClouds=${Math.round(avgClouds)}%) — moderate charge target rather than defaulting to full.`
     };
 }
 
@@ -151,14 +161,25 @@ function buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc) {
     };
 }
 
-function formatMessage(classification, reasoning, requestBody, dryRun) {
+// dischargePlan is only ever non-null (and only ever adds its line) when
+// buildSurplusDischargePlan decided current SOC has enough surplus above
+// tonight's target to be worth exporting — see "Pre-emptive surplus
+// discharge" in docs/battery-charge-logic.md.
+function formatMessage(classification, reasoning, requestBody, dryRun, dischargePlan) {
     const classificationLabel = classification === 'disabled' ? 'Automation disabled' : `Tomorrow's forecast: ${classification}`;
-    return [
-        classificationLabel,
-        reasoning,
-        '',
-        `${dryRun ? 'Would set' : 'Set'} tonight's battery charge target to ${requestBody.chargeUpperSoc}%.`
-    ].join('\n');
+    const lines = [classificationLabel, reasoning, ''];
+
+    if (dischargePlan?.shouldDischarge) {
+        lines.push(
+            `Battery is at ${dischargePlan.currentSoc}%, ${dischargePlan.surplusPercent} points above tonight's ` +
+            `${requestBody.chargeUpperSoc}% target — ${dryRun ? 'would discharge' : 'discharging'} the surplus to ` +
+            `the grid now, then resuming the normal overnight schedule at ~23:55.`
+        );
+    } else {
+        lines.push(`${dryRun ? 'Would set' : 'Set'} tonight's battery charge target to ${requestBody.chargeUpperSoc}%.`);
+    }
+
+    return lines.join('\n');
 }
 
 async function publish(topicArn, subject, message) {
@@ -176,7 +197,14 @@ function buildBatteryStatusRecord(deviceSn, timestampSeconds, fields) {
         applied: fields.applied,
         enabled: fields.enabled,
         appliesToDate: fields.appliesToDate,
-        previousAssessment: fields.previousAssessment || null
+        previousAssessment: fields.previousAssessment || null,
+        // Surplus-discharge fields (see buildSurplusDischargePlan) — dischargeApplied
+        // is what handleExitDischarge checks to know whether it has anything to
+        // do at ~23:55; dischargeExitApplied is merged onto this same record by
+        // that phase once it exits VPP mode and sets the deferred self-use mode.
+        dischargeApplied: fields.dischargeApplied ?? false,
+        dischargeSurplusPercent: fields.dischargeSurplusPercent ?? null,
+        dischargeExitApplied: fields.dischargeExitApplied ?? null
     };
 }
 
@@ -292,6 +320,35 @@ async function queryPreviousStatusRecord(deviceSn, beforeTimestamp) {
     return result.Items?.[0] || null;
 }
 
+async function queryLatestReading(deviceSn) {
+    const result = await docClient.send(new QueryCommand({
+        TableName: process.env.ENERGY_READINGS_TABLE,
+        KeyConditionExpression: 'DeviceSn = :sn',
+        ExpressionAttributeValues: { ':sn': deviceSn },
+        ScanIndexForward: false,
+        Limit: 1
+    }));
+    return result.Items?.[0] || null;
+}
+
+// If current SOC already exceeds tonight's just-decided charge target,
+// chargeUpperSoc (a ceiling, not a floor) means the overnight charge window
+// won't touch that surplus either way — it'll just sit unused unless normal
+// household load happens to consume it. Exporting it before midnight
+// captures some value from otherwise-idle capacity instead. No premium feed-in
+// window needed for this to be worth doing, unlike the arbitrage this app's
+// now-removed GridDischargeFunction depended on — see docs/battery-charge-logic.md.
+// minSurplusPercent avoids cycling the battery to export a negligible amount.
+function buildSurplusDischargePlan({ currentSoc, targetSoc, minSurplusPercent, maxDischargePowerW }) {
+    const surplusPercent = round2(Math.max(0, currentSoc - targetSoc));
+
+    if (surplusPercent < minSurplusPercent) {
+        return { shouldDischarge: false, currentSoc, targetSoc, surplusPercent };
+    }
+
+    return { shouldDischarge: true, currentSoc, targetSoc, surplusPercent, dischargePowerW: maxDischargePowerW };
+}
+
 async function queryReadingsSince(deviceSn, startSeconds, endSeconds) {
     const readings = [];
     let exclusiveStartKey;
@@ -380,88 +437,193 @@ function round2(n) {
     return Math.round(n * 100) / 100;
 }
 
-exports.handler = async () => {
-    try {
-        const batteryControlConfig = JSON.parse(process.env.BATTERY_CONTROL_CONFIG);
-        const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
-        const deviceSn = process.env.SOLAX_INVERTER_SN;
-        const nowSeconds = Math.floor(Date.now() / 1000);
-        // Runs at ~21:30 local, before the 00:00-06:00 overnight charge window
-        // — whatever chargeUpperSoc is decided tonight takes effect starting
-        // that window, i.e. it applies to the calendar day that starts right
-        // after.
-        const appliesToDate = localDateString(nowSeconds + 24 * 60 * 60, tariff.timezone);
+// The nightly decision — forecast classification, tonight's chargeUpperSoc,
+// and (new) the surplus-discharge check. When a discharge is triggered, Self
+// Use mode is deliberately NOT set this run — see the comment above the
+// discharge branch below — handleExitDischarge sets it later instead.
+async function handleDecide(deviceSn, nowSeconds) {
+    const batteryControlConfig = JSON.parse(process.env.BATTERY_CONTROL_CONFIG);
+    const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
+    // Runs at ~21:00 local, before the 00:00-06:00 overnight charge window —
+    // whatever chargeUpperSoc is decided tonight takes effect starting that
+    // window, i.e. it applies to the calendar day that starts right after.
+    const appliesToDate = localDateString(nowSeconds + 24 * 60 * 60, tariff.timezone);
 
-        const settingsOverride = await loadSettingsOverride(deviceSn);
-        const effective = resolveEffectiveSettings(batteryControlConfig, settingsOverride);
-        const dryRun = effective.dryRun;
-        const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds);
+    const settingsOverride = await loadSettingsOverride(deviceSn);
+    const effective = resolveEffectiveSettings(batteryControlConfig, settingsOverride);
+    const dryRun = effective.dryRun;
+    const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds);
 
-        let classification;
-        let reasoning;
-        let chargeUpperSoc;
+    let classification;
+    let reasoning;
+    let chargeUpperSoc;
 
-        if (!effective.enabled) {
-            // The toggle turns off nightly *forecasting*, not the battery itself —
-            // it still holds chargeUpperSoc at a known-safe default (100% unless
-            // overridden) rather than leaving whatever the last automated run
-            // happened to decide. No weather call either way.
-            classification = 'disabled';
-            reasoning = `Automation disabled via dashboard settings — holding chargeUpperSoc at the configured default (${effective.disabledChargeUpperSoc}%) instead of leaving the last automated decision in place.`;
-            chargeUpperSoc = effective.disabledChargeUpperSoc;
-        } else {
-            const slots = await fetchTomorrowForecast(
-                process.env.WEATHER_LAT, process.env.WEATHER_LON, tariff.timezone
-            );
-            ({ classification, reasoning } = classifyForecast(slots));
-            chargeUpperSoc = chargeTargetForClassification(classification, effective);
+    if (!effective.enabled) {
+        // The toggle turns off nightly *forecasting*, not the battery itself —
+        // it still holds chargeUpperSoc at a known-safe default (100% unless
+        // overridden) rather than leaving whatever the last automated run
+        // happened to decide. No weather call either way.
+        classification = 'disabled';
+        reasoning = `Automation disabled via dashboard settings — holding chargeUpperSoc at the configured default (${effective.disabledChargeUpperSoc}%) instead of leaving the last automated decision in place.`;
+        chargeUpperSoc = effective.disabledChargeUpperSoc;
+    } else {
+        const slots = await fetchTomorrowForecast(
+            process.env.WEATHER_LAT, process.env.WEATHER_LON, tariff.timezone
+        );
+        ({ classification, reasoning } = classifyForecast(slots));
+        chargeUpperSoc = chargeTargetForClassification(classification, effective);
+    }
+
+    const requestBody = buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc);
+
+    // Same "enabled" toggle gates this — when nightly control is off, this
+    // stays fully hands-off the inverter, not just skipping the forecast call.
+    let dischargePlan = null;
+    if (effective.enabled) {
+        const latestReading = await queryLatestReading(deviceSn);
+        if (latestReading && typeof latestReading.batterySOC === 'number') {
+            dischargePlan = buildSurplusDischargePlan({
+                currentSoc: latestReading.batterySOC,
+                targetSoc: chargeUpperSoc,
+                minSurplusPercent: batteryControlConfig.minSurplusPercent ?? 5,
+                maxDischargePowerW: batteryControlConfig.maxDischargePowerW ?? 3000
+            });
+        }
+    }
+
+    const message = formatMessage(classification, reasoning, requestBody, dryRun, dischargePlan);
+
+    if (dischargePlan?.shouldDischarge) {
+        // VPP SOC Target Control holds the inverter in override indefinitely
+        // once set (see solax-client.js) — calling setInverterSelfUseMode in
+        // this same run would immediately cancel the discharge we're about to
+        // start. handleExitDischarge (~23:55) exits VPP mode and sets tonight's
+        // chargeUpperSoc via Self Use mode instead, once the discharge is done.
+        if (!dryRun) {
+            const { clientId, clientSecret } = await loadSolaxCredentials();
+            const baseUrl = process.env.SOLAX_BASE_URL;
+            const businessType = Number(process.env.SOLAX_BUSINESS_TYPE) || BUSINESS_TYPE.RESIDENTIAL;
+            const accessToken = await getAccessToken({ baseUrl, clientId, clientSecret });
+
+            await setInverterSocTargetMode(baseUrl, accessToken, {
+                snList: deviceSn,
+                businessType,
+                targetSoc: dischargePlan.targetSoc,
+                chargeDischargPower: -dischargePlan.dischargePowerW // negative = discharge
+            });
         }
 
-        const requestBody = buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc);
+        logInfo(`Battery control ${dryRun ? 'dry run' : 'applied'} (surplus discharge)`, {
+            classification, reasoning, dischargePlan, enabled: effective.enabled
+        });
+        await publish(
+            process.env.REPORTS_TOPIC_ARN,
+            `PowerPlant battery control — ${dryRun ? 'DRY RUN (no change applied)' : 'applied'}`,
+            message
+        );
+        await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
+            classification, reasoning, chargeUpperSoc, dryRun, applied: !dryRun, enabled: effective.enabled,
+            appliesToDate, previousAssessment,
+            dischargeApplied: true, dischargeSurplusPercent: dischargePlan.surplusPercent
+        }));
+        return { statusCode: 200 };
+    }
 
-        if (dryRun) {
-            logInfo('Battery control dry run', { classification, reasoning, requestBody, enabled: effective.enabled });
-            await publish(
-                process.env.REPORTS_TOPIC_ARN,
-                'PowerPlant battery control — DRY RUN (no change applied)',
-                formatMessage(classification, reasoning, requestBody, true)
-            );
-            await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
-                classification, reasoning, chargeUpperSoc, dryRun: true, applied: false, enabled: effective.enabled,
-                appliesToDate, previousAssessment
-            }));
-            return { statusCode: 200 };
-        }
+    // No surplus to shed (or the discharge check found no usable SOC reading)
+    // — set the overnight self-use mode now, exactly as before this rule existed.
+    if (dryRun) {
+        logInfo('Battery control dry run', { classification, reasoning, requestBody, enabled: effective.enabled });
+        await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant battery control — DRY RUN (no change applied)', message);
+        await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
+            classification, reasoning, chargeUpperSoc, dryRun: true, applied: false, enabled: effective.enabled,
+            appliesToDate, previousAssessment, dischargeApplied: false
+        }));
+        return { statusCode: 200 };
+    }
 
+    const { clientId, clientSecret } = await loadSolaxCredentials();
+    const baseUrl = process.env.SOLAX_BASE_URL;
+    const businessType = Number(process.env.SOLAX_BUSINESS_TYPE) || BUSINESS_TYPE.RESIDENTIAL;
+    const accessToken = await getAccessToken({ baseUrl, clientId, clientSecret });
+
+    await setInverterSelfUseMode(baseUrl, accessToken, {
+        snList: process.env.SOLAX_INVERTER_SN,
+        businessType,
+        ...requestBody
+    });
+
+    logInfo('Battery control applied', { classification, reasoning, requestBody, enabled: effective.enabled });
+    await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant battery control — applied', message);
+    await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
+        classification, reasoning, chargeUpperSoc, dryRun: false, applied: true, enabled: effective.enabled,
+        appliesToDate, previousAssessment, dischargeApplied: false
+    }));
+    return { statusCode: 200 };
+}
+
+// Runs ~23:55, before the 00:00 overnight charge window opens. A no-op unless
+// tonight's decide phase actually engaged VPP SOC Target Control
+// (dischargeApplied: true on tonight's stored record, checked with a
+// freshness bound so a failed/missing tonight run never acts on a stale
+// prior night's record) — in that case this exits VPP mode and only then
+// sets the overnight self-use mode with tonight's chargeUpperSoc, which
+// decide deferred. See handleDecide's discharge branch.
+async function handleExitDischarge(deviceSn, nowSeconds) {
+    const MAX_RECORD_AGE_SECONDS = 4 * 60 * 60; // decide (~21:00) to exit (~23:55) is ~2h55m — generous margin, still excludes a prior night's record
+
+    const record = await queryPreviousStatusRecord(deviceSn, nowSeconds);
+    if (!record || !record.dischargeApplied || (nowSeconds - record.Timestamp) > MAX_RECORD_AGE_SECONDS) {
+        logInfo('Battery control exitDischarge: no discharge to exit tonight — nothing to do');
+        return { statusCode: 200 };
+    }
+
+    const batteryControlConfig = JSON.parse(process.env.BATTERY_CONTROL_CONFIG);
+    const requestBody = buildSelfUseModeRequest(batteryControlConfig, record.chargeUpperSoc);
+    const message = `${record.dryRun ? 'Would exit' : 'Exited'} VPP override and ` +
+        `${record.dryRun ? 'set' : 'setting'} tonight's charge target (${record.chargeUpperSoc}%) for the overnight window.`;
+
+    if (!record.dryRun) {
         const { clientId, clientSecret } = await loadSolaxCredentials();
         const baseUrl = process.env.SOLAX_BASE_URL;
         const businessType = Number(process.env.SOLAX_BUSINESS_TYPE) || BUSINESS_TYPE.RESIDENTIAL;
         const accessToken = await getAccessToken({ baseUrl, clientId, clientSecret });
 
-        await setInverterSelfUseMode(baseUrl, accessToken, {
-            snList: process.env.SOLAX_INVERTER_SN,
-            businessType,
-            ...requestBody
-        });
+        await exitVppMode(baseUrl, accessToken, { snList: deviceSn, businessType });
+        await setInverterSelfUseMode(baseUrl, accessToken, { snList: deviceSn, businessType, ...requestBody });
+    }
 
-        logInfo('Battery control applied', { classification, reasoning, requestBody, enabled: effective.enabled });
-        await publish(
-            process.env.REPORTS_TOPIC_ARN,
-            'PowerPlant battery control — applied',
-            formatMessage(classification, reasoning, requestBody, false)
-        );
-        await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
-            classification, reasoning, chargeUpperSoc, dryRun: false, applied: true, enabled: effective.enabled,
-            appliesToDate, previousAssessment
-        }));
-        return { statusCode: 200 };
+    logInfo(`Battery control exitDischarge ${record.dryRun ? 'dry run' : 'applied'}`, { requestBody });
+    await publish(
+        process.env.REPORTS_TOPIC_ARN,
+        `PowerPlant battery control — ${record.dryRun ? 'DRY RUN exit (no change applied)' : 'exit applied'}`,
+        message
+    );
+
+    await docClient.send(new PutCommand({
+        TableName: process.env.ENERGY_READINGS_TABLE,
+        Item: { ...record, dischargeExitApplied: !record.dryRun }
+    }));
+
+    return { statusCode: 200 };
+}
+
+exports.handler = async (event) => {
+    const phase = event?.phase === 'exitDischarge' ? 'exitDischarge' : 'decide';
+
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const nowSeconds = Math.floor(Date.now() / 1000);
+
+        return phase === 'exitDischarge'
+            ? await handleExitDischarge(deviceSn, nowSeconds)
+            : await handleDecide(deviceSn, nowSeconds);
     } catch (err) {
-        logError('Battery control failed', { error: err.message });
+        logError('Battery control failed', { phase, error: err.message });
         try {
             await publish(
                 process.env.ALERTS_TOPIC_ARN,
                 'PowerPlant battery control — FAILED',
-                `Battery control run failed and made no change: ${err.message}`
+                `Battery control ${phase} phase failed and made no change: ${err.message}`
             );
         } catch (publishErr) {
             logError('Failed to publish battery control failure alert', { error: publishErr.message });
@@ -477,6 +639,7 @@ module.exports.resolveEffectiveSettings = resolveEffectiveSettings;
 module.exports.chargeTargetForClassification = chargeTargetForClassification;
 module.exports.summarizeUsage = summarizeUsage;
 module.exports.parseAccuracyAssessment = parseAccuracyAssessment;
+module.exports.buildSurplusDischargePlan = buildSurplusDischargePlan;
 module.exports.BATTERY_STATUS_RECORD_PREFIX = BATTERY_STATUS_RECORD_PREFIX;
 module.exports.BATTERY_SETTINGS_PREFIX = BATTERY_SETTINGS_PREFIX;
 module.exports.SETTINGS_TIMESTAMP = SETTINGS_TIMESTAMP;

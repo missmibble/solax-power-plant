@@ -10,6 +10,7 @@ const {
     findImportRateWindow,
     importCostForWindow,
     exportCredit,
+    supplyChargeForPeriod,
     localDateString
 } = require('powerplant-shared');
 
@@ -28,7 +29,11 @@ const LOW_SOC_THRESHOLD = 30;
 // the latest one on the dashboard.
 const REPORT_RECORD_PREFIX = 'REPORT#';
 
-const AI_SYSTEM_PROMPT = `You are an energy analyst for a home solar + battery system. You are given \
+const AI_SYSTEM_PROMPT = `You are an energy analyst for a home solar + battery system. The household also \
+owns an electric vehicle that is often plugged in to charge overnight (00:00-06:00, the night-ev-charge \
+tariff window) — its charging draws from the grid independently of the battery, varies night to night (not \
+every night has a full charging session), and can produce import spikes in that window, or after the battery \
+itself has stopped charging, that aren't related to the battery's own behaviour. You are given \
 today's usage assessment (import broken down by tariff window, PV yield, export, and battery charge/ \
 discharge/SOC if available) plus a day-by-day summary of the recent history for context. Respond with \
 ONLY a JSON object of the form {"narrative": string, "anomalies": string[]} — no text outside the JSON.
@@ -37,7 +42,8 @@ ONLY a JSON object of the form {"narrative": string, "anomalies": string[]} — 
 existing recommendation still makes sense in that context.
 "anomalies": notable deviations from the recent pattern (empty array if none) — e.g. an unusual drop in \
 PV yield, an import spike outside the normal pattern, or battery behaviour that differs from recent days. \
-Do not restate ordinary day-to-day variation as an anomaly.`;
+Do not restate ordinary day-to-day variation as an anomaly, including normal night-to-night differences in \
+EV charging.`;
 
 // Battery charge/discharge/SOC fields are only present when PollerFunction
 // successfully attached them (it discovers the battery device automatically —
@@ -144,6 +150,7 @@ function assessUsage(readings, tariff) {
 
     const totalImportCost = Object.values(byWindow).reduce((sum, w) => sum + w.cost, 0);
     const totalExportCredit = exportCredit(tariff, exportKwh);
+    const supplyCharge = supplyChargeForPeriod(tariff, readings[0].Timestamp, readings[readings.length - 1].Timestamp);
     const peakImportKwh = byWindow[PEAK_WINDOW_LABEL]?.importKwh || 0;
 
     return {
@@ -152,7 +159,8 @@ function assessUsage(readings, tariff) {
         byWindow,
         totalImportCost: round2(totalImportCost),
         totalExportCredit: round2(totalExportCredit),
-        netCost: round2(totalImportCost - totalExportCredit),
+        supplyCharge: round2(supplyCharge),
+        netCost: round2(totalImportCost + supplyCharge - totalExportCredit),
         peakImportKwh: round2(peakImportKwh),
         ...batterySummary(readings, tariff)
     };
@@ -285,7 +293,8 @@ function formatReport(assessment, tariff, lookbackDays, aiInsights) {
 
     lines.push('');
     lines.push(`Total import cost: ${assessment.totalImportCost} ${tariff.currency}`);
-    lines.push(`Net cost (import - export credit): ${assessment.netCost} ${tariff.currency}`);
+    lines.push(`Daily supply charge: ${assessment.supplyCharge} ${tariff.currency}`);
+    lines.push(`Net cost (import + supply charge - export credit): ${assessment.netCost} ${tariff.currency}`);
     lines.push('');
     lines.push(recommendation(assessment, tariff));
 

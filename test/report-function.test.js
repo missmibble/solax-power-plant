@@ -51,7 +51,10 @@ describe('ReportFunction assessUsage', () => {
         expect(assessment.exportKwh).toBe(1);
         expect(assessment.totalExportCredit).toBeCloseTo(0.02, 2);
         expect(assessment.totalImportCost).toBeCloseTo(1.16, 2);
-        expect(assessment.netCost).toBeCloseTo(1.14, 2);
+        // all readings fall within a single local calendar day, so the daily
+        // supply charge is applied exactly once
+        expect(assessment.supplyCharge).toBeCloseTo(1.45805, 2);
+        expect(assessment.netCost).toBeCloseTo(2.60, 2);
     });
 
     test('surfaces peak-window import for the recommendation heuristic', () => {

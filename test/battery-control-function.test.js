@@ -8,6 +8,8 @@ const mockDynamoSend = jest.fn();
 const mockBedrockSend = jest.fn();
 const mockGetAccessToken = jest.fn();
 const mockSetInverterSelfUseMode = jest.fn();
+const mockSetInverterSocTargetMode = jest.fn();
+const mockExitVppMode = jest.fn();
 
 // These only live in lambda/BatteryControlFunction/node_modules (per-function
 // deps), not the root node_modules test/ resolves from — virtual: true skips
@@ -49,6 +51,8 @@ jest.mock('powerplant-shared', () => {
         BUSINESS_TYPE: { RESIDENTIAL: 1 },
         getAccessToken: (...args) => mockGetAccessToken(...args),
         setInverterSelfUseMode: (...args) => mockSetInverterSelfUseMode(...args),
+        setInverterSocTargetMode: (...args) => mockSetInverterSocTargetMode(...args),
+        exitVppMode: (...args) => mockExitVppMode(...args),
         localDateString,
         findImportRateWindow,
         fetchTomorrowForecast
@@ -117,9 +121,40 @@ function bedrockTextResponse(text) {
     return { body: new TextEncoder().encode(JSON.stringify({ content: [{ text }] })) };
 }
 
+// Routes the "latest reading" Query (queryLatestReading, keyed by the plain
+// device SN) to a controlled batterySOC, while leaving the settings-override
+// Get and the previous-status-record Query (BATTERY_CONTROL# prefix) at
+// their defaults unless overridden.
+function dynamoImplWithReading(batterySOC, { get, statusRecord } = {}) {
+    return command => {
+        if (command.__type === 'Get') return Promise.resolve(get || {});
+        if (command.__type === 'Query') {
+            const sn = command.input.ExpressionAttributeValues[':sn'];
+            if (sn === process.env.SOLAX_INVERTER_SN) return Promise.resolve({ Items: [{ batterySOC }] });
+            if (sn.startsWith('BATTERY_CONTROL#')) return Promise.resolve(statusRecord || { Items: [] });
+            return Promise.resolve({ Items: [] });
+        }
+        return Promise.resolve({});
+    };
+}
+
+// Routes the exitDischarge phase's "latest status record" Query (BATTERY_CONTROL#
+// prefix) to a controlled record.
+function dynamoImplWithStatusRecord(record) {
+    return command => {
+        if (command.__type === 'Query') {
+            const sn = command.input.ExpressionAttributeValues[':sn'];
+            if (sn.startsWith('BATTERY_CONTROL#')) return Promise.resolve({ Items: record ? [record] : [] });
+            return Promise.resolve({ Items: [] });
+        }
+        return Promise.resolve({});
+    };
+}
+
 describe('BatteryControlFunction', () => {
     let classifyForecast, buildSelfUseModeRequest, buildBatteryStatusRecord, resolveEffectiveSettings,
-        chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, BATTERY_STATUS_RECORD_PREFIX, handler;
+        chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, buildSurplusDischargePlan,
+        BATTERY_STATUS_RECORD_PREFIX, handler;
 
     beforeEach(() => {
         jest.resetModules();
@@ -129,6 +164,8 @@ describe('BatteryControlFunction', () => {
         mockBedrockSend.mockReset();
         mockGetAccessToken.mockReset();
         mockSetInverterSelfUseMode.mockReset();
+        mockSetInverterSocTargetMode.mockReset();
+        mockExitVppMode.mockReset();
         global.fetch = jest.fn();
 
         process.env.WEATHER_LAT = '-33.0000';
@@ -147,7 +184,8 @@ describe('BatteryControlFunction', () => {
 
         ({
             classifyForecast, buildSelfUseModeRequest, buildBatteryStatusRecord, resolveEffectiveSettings,
-            chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, BATTERY_STATUS_RECORD_PREFIX, handler
+            chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, buildSurplusDischargePlan,
+            BATTERY_STATUS_RECORD_PREFIX, handler
         } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
     });
 
@@ -378,6 +416,36 @@ describe('BatteryControlFunction', () => {
         });
     });
 
+    describe('buildSurplusDischargePlan', () => {
+        test('recommends discharging down to the target when surplus exceeds the minimum threshold', () => {
+            const plan = buildSurplusDischargePlan({ currentSoc: 80, targetSoc: 40, minSurplusPercent: 5, maxDischargePowerW: 3000 });
+            expect(plan).toEqual({ shouldDischarge: true, currentSoc: 80, targetSoc: 40, surplusPercent: 40, dischargePowerW: 3000 });
+        });
+
+        test('holds when surplus is below the minimum threshold', () => {
+            const plan = buildSurplusDischargePlan({ currentSoc: 43, targetSoc: 40, minSurplusPercent: 5, maxDischargePowerW: 3000 });
+            expect(plan).toEqual({ shouldDischarge: false, currentSoc: 43, targetSoc: 40, surplusPercent: 3 });
+        });
+
+        test('surplus exactly at the minimum threshold counts as dischargeable', () => {
+            const plan = buildSurplusDischargePlan({ currentSoc: 45, targetSoc: 40, minSurplusPercent: 5, maxDischargePowerW: 3000 });
+            expect(plan.shouldDischarge).toBe(true);
+            expect(plan.surplusPercent).toBe(5);
+        });
+
+        test('holds when current SOC is already at the target', () => {
+            const plan = buildSurplusDischargePlan({ currentSoc: 40, targetSoc: 40, minSurplusPercent: 5, maxDischargePowerW: 3000 });
+            expect(plan.shouldDischarge).toBe(false);
+            expect(plan.surplusPercent).toBe(0);
+        });
+
+        test('never reports a negative surplus when current SOC is below target', () => {
+            const plan = buildSurplusDischargePlan({ currentSoc: 20, targetSoc: 40, minSurplusPercent: 5, maxDischargePowerW: 3000 });
+            expect(plan.shouldDischarge).toBe(false);
+            expect(plan.surplusPercent).toBe(0);
+        });
+    });
+
     describe('handler (dry run)', () => {
         test('publishes a DRY RUN message, stores a status record, and never calls the control endpoint', async () => {
             global.fetch.mockResolvedValue({
@@ -557,6 +625,170 @@ describe('BatteryControlFunction', () => {
             expect(putCall.input.Item.chargeUpperSoc).toBe(100);
             expect(putCall.input.Item.dryRun).toBe(false);
             expect(putCall.input.Item.applied).toBe(true);
+        });
+    });
+
+    describe('handler (surplus discharge)', () => {
+        test('dry run: does not call any control endpoint, stores dischargeApplied, message mentions the discharge', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithReading(80));
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) }); // clear -> sunny -> 40% target; 80% SOC is 40 points above
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
+            expect(mockSetInverterSocTargetMode).not.toHaveBeenCalled();
+            expect(mockGetAccessToken).not.toHaveBeenCalled();
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Subject).toContain('DRY RUN');
+            expect(publishCall.input.Message).toContain('would discharge');
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dischargeApplied).toBe(true);
+            expect(putCall.input.Item.dischargeSurplusPercent).toBe(40);
+            expect(putCall.input.Item.chargeUpperSoc).toBe(40);
+            expect(putCall.input.Item.dryRun).toBe(true);
+            expect(putCall.input.Item.applied).toBe(false);
+        });
+
+        test('live: calls setInverterSocTargetMode to discharge, and does not set self-use mode this run', async () => {
+            process.env.BATTERY_CONTROL_CONFIG = JSON.stringify({ ...BASELINE_CONFIG, dryRun: false });
+            mockDynamoSend.mockImplementation(dynamoImplWithReading(80));
+
+            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
+            mockGetAccessToken.mockResolvedValue('access-token');
+            mockSetInverterSocTargetMode.mockResolvedValue({ [process.env.SOLAX_INVERTER_SN]: { status: 4 } });
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
+            expect(mockSetInverterSocTargetMode).toHaveBeenCalledTimes(1);
+            const [, , request] = mockSetInverterSocTargetMode.mock.calls[0];
+            expect(request.targetSoc).toBe(40);
+            expect(request.chargeDischargPower).toBe(-3000); // negative = discharge, default maxDischargePowerW
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Subject).toContain('applied');
+            expect(publishCall.input.Message).toContain('discharging');
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dischargeApplied).toBe(true);
+            expect(putCall.input.Item.dryRun).toBe(false);
+            expect(putCall.input.Item.applied).toBe(true);
+        });
+
+        test('no discharge when surplus is below the minimum threshold — sets self-use mode as usual', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithReading(42)); // only 2 points above the 40% sunny target
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
+
+            await handler();
+
+            expect(mockSetInverterSocTargetMode).not.toHaveBeenCalled();
+            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled(); // dryRun: true by default
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dischargeApplied).toBe(false);
+            expect(putCall.input.Item.chargeUpperSoc).toBe(40);
+        });
+
+        test('no discharge when nightly control is disabled, even with a large surplus reading', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithReading(95, { get: { Item: { enabled: false } } }));
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSetInverterSocTargetMode).not.toHaveBeenCalled();
+            expect(global.fetch).not.toHaveBeenCalled();
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dischargeApplied).toBe(false);
+            expect(putCall.input.Item.classification).toBe('disabled');
+        });
+    });
+
+    describe('handler (exitDischarge phase)', () => {
+        function freshRecord(overrides) {
+            return {
+                Timestamp: Math.floor(Date.now() / 1000) - 3600, // 1h old — within the freshness window
+                classification: 'sunny',
+                chargeUpperSoc: 40,
+                dischargeApplied: true,
+                dryRun: true,
+                ...overrides
+            };
+        }
+
+        test('no-op when no status record exists for tonight', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(null));
+
+            const result = await handler({ phase: 'exitDischarge' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSnsSend).not.toHaveBeenCalled();
+            expect(mockExitVppMode).not.toHaveBeenCalled();
+            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
+        });
+
+        test('no-op when tonight\'s record shows no discharge was applied', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(freshRecord({ dischargeApplied: false })));
+
+            const result = await handler({ phase: 'exitDischarge' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockSnsSend).not.toHaveBeenCalled();
+            expect(mockExitVppMode).not.toHaveBeenCalled();
+        });
+
+        test('no-op when the only discharge record found is stale (from a previous night)', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(
+                freshRecord({ Timestamp: Math.floor(Date.now() / 1000) - 5 * 3600 }) // 5h old
+            ));
+
+            const result = await handler({ phase: 'exitDischarge' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockExitVppMode).not.toHaveBeenCalled();
+        });
+
+        test('dry run: publishes a DRY RUN exit message without calling the control endpoint', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(freshRecord({ dryRun: true })));
+
+            const result = await handler({ phase: 'exitDischarge' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockExitVppMode).not.toHaveBeenCalled();
+            expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Subject).toContain('DRY RUN exit');
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dischargeExitApplied).toBe(false);
+        });
+
+        test('live: exits VPP mode, then sets self-use mode with the stored chargeUpperSoc', async () => {
+            mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(freshRecord({ dryRun: false, chargeUpperSoc: 55 })));
+            mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
+            mockGetAccessToken.mockResolvedValue('access-token');
+            mockExitVppMode.mockResolvedValue({});
+            mockSetInverterSelfUseMode.mockResolvedValue({});
+
+            const result = await handler({ phase: 'exitDischarge' });
+
+            expect(result.statusCode).toBe(200);
+            expect(mockExitVppMode).toHaveBeenCalledTimes(1);
+            expect(mockSetInverterSelfUseMode).toHaveBeenCalledTimes(1);
+            const [, , request] = mockSetInverterSelfUseMode.mock.calls[0];
+            expect(request.chargeUpperSoc).toBe(55);
+
+            const publishCall = mockSnsSend.mock.calls[0][0];
+            expect(publishCall.input.Subject).toContain('exit applied');
+
+            const putCall = findPutCall();
+            expect(putCall.input.Item.dischargeExitApplied).toBe(true);
         });
     });
 

@@ -140,6 +140,15 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
+    test('schedules BatteryControlFunction\'s exitDischarge phase before the overnight charge window', () => {
+        template.hasResourceProperties('AWS::Events::Rule', {
+            ScheduleExpression: config.lambda.batteryControlFunction.exitDischargeSchedule,
+            Targets: Match.arrayWith([
+                Match.objectLike({ Input: JSON.stringify({ phase: 'exitDischarge' }) })
+            ])
+        });
+    });
+
     test('BatteryControlFunction gets the weather and battery-control config as env vars', () => {
         template.hasResourceProperties('AWS::Lambda::Function', {
             FunctionName: config.lambda.batteryControlFunction.functionName,

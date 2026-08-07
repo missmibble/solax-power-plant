@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-    findImportRateWindow, importCostForWindow, exportCredit, localDateString, startOfLocalDay
+    findImportRateWindow, importCostForWindow, exportCredit, supplyChargeForPeriod, localDateString, startOfLocalDay
 } = require('../lambda/Utilities/tariff');
 
 const config = JSON.parse(
@@ -64,6 +64,24 @@ describe('tariff', () => {
 
         test('returns 0 when feedInRate is missing', () => {
             expect(exportCredit({ importRates: [] }, 5)).toBe(0);
+        });
+    });
+
+    describe('supplyChargeForPeriod', () => {
+        test('charges exactly one day when the period falls within a single local calendar day', () => {
+            const charge = supplyChargeForPeriod(tariff, utcSeconds(0, 5), utcSeconds(23, 55));
+            expect(charge).toBeCloseTo(1.45805);
+        });
+
+        test('charges one day per local calendar day spanned, inclusive of both ends', () => {
+            const from = utcSeconds(0, 0); // 2026-07-30 00:00 local
+            const to = from + 2 * 86400; // 2026-08-01 00:00 local, 2 days later
+            expect(supplyChargeForPeriod(tariff, from, to)).toBeCloseTo(3 * 1.45805);
+        });
+
+        test('returns 0 when dailySupplyCharge is not configured', () => {
+            const { dailySupplyCharge, ...tariffWithoutCharge } = tariff;
+            expect(supplyChargeForPeriod(tariffWithoutCharge, utcSeconds(0, 0), utcSeconds(23, 59))).toBe(0);
         });
     });
 

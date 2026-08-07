@@ -52,6 +52,7 @@
     <div class="card">
       <span class="card-label">Net Cost</span>
       <span class="card-value" id="netCost">–</span>
+      <span class="card-sub" id="supplyCharge">–</span>
     </div>
   </section>
 
@@ -63,6 +64,7 @@
 
   <section class="pv-status-panel" id="pvStatusPanelSection" hidden>
     <h2>Current PV Status</h2>
+    <p class="panel-note">Snapshot from the last poll (up to ~5 min old) — can lag the SolaX app on rapidly changing (cloudy) days.</p>
     <div class="cards">
       <div class="card">
         <span class="card-label">PV Power</span>
@@ -119,6 +121,12 @@
       <span class="widget-value" id="batteryChargeTarget">–</span>
       <span class="widget-sub" id="batteryDecisionAppliesTo">–</span>
       <span class="widget-sub" id="batteryDecisionMeta">–</span>
+    </div>
+    <div class="widget" id="dischargeWidget" hidden>
+      <span class="widget-label">Previous night's discharge</span>
+      <span class="widget-value" id="dischargeAmount">–</span>
+      <span class="widget-sub" id="dischargeCredit">–</span>
+      <span class="widget-sub" id="dischargeMeta">–</span>
     </div>
   </section>
   <p id="batteryStatusStatus" class="status" hidden></p>

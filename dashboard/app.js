@@ -28,6 +28,7 @@ const els = {
   exportKwh: document.getElementById('exportKwh'),
   exportCredit: document.getElementById('exportCredit'),
   netCost: document.getElementById('netCost'),
+  supplyCharge: document.getElementById('supplyCharge'),
   pvStatusPanelSection: document.getElementById('pvStatusPanelSection'),
   livePvPower: document.getElementById('livePvPower'),
   livePvStatus: document.getElementById('livePvStatus'),
@@ -48,6 +49,10 @@ const els = {
   batteryChargeTarget: document.getElementById('batteryChargeTarget'),
   batteryDecisionAppliesTo: document.getElementById('batteryDecisionAppliesTo'),
   batteryDecisionMeta: document.getElementById('batteryDecisionMeta'),
+  dischargeWidget: document.getElementById('dischargeWidget'),
+  dischargeAmount: document.getElementById('dischargeAmount'),
+  dischargeCredit: document.getElementById('dischargeCredit'),
+  dischargeMeta: document.getElementById('dischargeMeta'),
   batteryStatusStatus: document.getElementById('batteryStatusStatus'),
   aiCardSection: document.getElementById('aiCardSection'),
   insightsStatus: document.getElementById('insightsStatus'),
@@ -257,6 +262,7 @@ function render(data) {
   els.exportKwh.textContent = `${data.exportKwh} kWh`;
   els.exportCredit.textContent = `${data.exportCredit} ${currency} credit`;
   els.netCost.textContent = `${data.netCost} ${currency}`;
+  els.supplyCharge.textContent = `incl. ${data.supplyCharge} ${currency} supply charge`;
 
   renderLivePvStatus(data);
   renderLiveBatteryStatus(data);
@@ -427,6 +433,7 @@ async function loadBatteryStatus() {
   setCurrentWeather(null, 'Loading current weather…');
   setForecastDecision('—', 'Loading tomorrow’s forecast…');
   els.batteryDecisionWidget.hidden = true;
+  els.dischargeWidget.hidden = true;
   els.previousAssessmentWidget.hidden = true;
 
   try {
@@ -501,6 +508,8 @@ function renderBatteryStatus(data) {
     ? `Applies from ${formatAppliesToDate(data.appliesToDate)}`
     : '';
 
+  renderDischarge(data);
+
   if (data.previousAssessment) {
     els.previousAssessmentAccurate.textContent = data.previousAssessment.accurate ? '✓ On target' : '✗ Off target';
     els.previousAssessmentText.textContent = data.previousAssessment.usageShouldInfluence
@@ -509,6 +518,37 @@ function renderBatteryStatus(data) {
     els.previousAssessmentWidget.hidden = false;
     showAiCard();
   }
+}
+
+// Only shown on a night the pre-emptive surplus-discharge rule actually
+// triggered — most nights there's nothing to show, so the widget stays
+// hidden rather than displaying a "no discharge" placeholder every day.
+// dischargeKwh/feedInCredit are only ever populated for a live (non-dry-run)
+// night — DashboardApiFunction only measures them then, since a dry run never
+// called SolaX and there's no real discharge event to measure.
+function renderDischarge(data) {
+  if (!data.discharge?.applied) {
+    els.dischargeWidget.hidden = true;
+    return;
+  }
+
+  const { surplusPercent, dischargeKwh, feedInCredit, currency, exitApplied } = data.discharge;
+
+  els.dischargeAmount.textContent = typeof dischargeKwh === 'number'
+    ? `${dischargeKwh} kWh discharged`
+    : `${surplusPercent}% SOC surplus ${data.dryRun ? 'would be' : 'was'} discharged`;
+
+  els.dischargeCredit.textContent = typeof feedInCredit === 'number'
+    ? `+${feedInCredit} ${currency} feed-in credit`
+    : '';
+
+  els.dischargeMeta.textContent = data.dryRun
+    ? 'Dry run — no change applied'
+    : exitApplied
+      ? 'Control handed back for the overnight charge window'
+      : 'Awaiting the ~23:55 exit phase';
+
+  els.dischargeWidget.hidden = false;
 }
 
 // SettingsOptimizerFunction's latest nightly recommendation — a separate

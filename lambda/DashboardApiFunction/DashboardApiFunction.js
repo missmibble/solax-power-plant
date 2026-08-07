@@ -3,7 +3,9 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, QueryCommand, GetCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
-const { logInfo, logError, importCostForWindow, exportCredit, startOfLocalDay, fetchCurrentConditions } = require('powerplant-shared');
+const {
+    logInfo, logError, importCostForWindow, exportCredit, supplyChargeForPeriod, startOfLocalDay, fetchCurrentConditions
+} = require('powerplant-shared');
 
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION });
@@ -177,10 +179,49 @@ async function handleBatteryStatus() {
             queryLatestSentinelRecord(`${BATTERY_STATUS_RECORD_PREFIX}${deviceSn}`),
             fetchCurrentWeather()
         ]);
-        return response(200, formatBatteryStatusResponse(item, currentWeather));
+
+        // Only worth measuring for a night the discharge actually happened live —
+        // a dry run never called SolaX, so there's no real discharge event for the
+        // totalDeviceDischarge counter to reflect over that window.
+        const dischargeSummary = item?.dischargeApplied && !item.dryRun
+            ? await computePreviousDischarge(deviceSn, item.Timestamp)
+            : null;
+
+        return response(200, formatBatteryStatusResponse(item, currentWeather, dischargeSummary));
     } catch (err) {
         logError('Battery status query failed', { error: err.message });
         return response(500, { message: 'Internal server error' });
+    }
+}
+
+// Actual measured energy discharged during a pre-emptive surplus-discharge
+// window (BatteryControlFunction's decide -> exitDischarge, ~21:00-23:55) —
+// the stored status record only has dischargeSurplusPercent (a SOC percentage),
+// not a kWh figure, so this recomputes it from the same totalDeviceDischarge
+// cumulative counter aggregateReadings/assessUsage already use elsewhere, over
+// a fixed window bounded the same way BatteryControlFunction.handleExitDischarge
+// bounds its own staleness check on this record.
+const MAX_DISCHARGE_WINDOW_SECONDS = 4 * 60 * 60;
+
+async function computePreviousDischarge(deviceSn, decidedAtSeconds) {
+    try {
+        const tariff = JSON.parse(process.env.TARIFF_STRUCTURE);
+        const readings = await queryReadings(deviceSn, decidedAtSeconds, decidedAtSeconds + MAX_DISCHARGE_WINDOW_SECONDS);
+        if (readings.length < 2) return null;
+
+        const first = readings[0];
+        const last = readings[readings.length - 1];
+        if (typeof first.totalDeviceDischarge !== 'number' || typeof last.totalDeviceDischarge !== 'number') return null;
+
+        const dischargeKwh = round2(Math.max(0, last.totalDeviceDischarge - first.totalDeviceDischarge));
+        return {
+            dischargeKwh,
+            feedInCredit: round2(exportCredit(tariff, dischargeKwh)),
+            currency: tariff.currency
+        };
+    } catch (err) {
+        logError('Previous-night discharge computation failed', { error: err.message });
+        return null;
     }
 }
 
@@ -201,7 +242,7 @@ async function fetchCurrentWeather() {
     }
 }
 
-function formatBatteryStatusResponse(item, currentWeather) {
+function formatBatteryStatusResponse(item, currentWeather, dischargeSummary) {
     if (!item) {
         return { available: false, currentWeather: currentWeather || null };
     }
@@ -217,7 +258,17 @@ function formatBatteryStatusResponse(item, currentWeather) {
         applied: item.applied,
         enabled: item.enabled ?? true,
         appliesToDate: item.appliesToDate || null,
-        previousAssessment: item.previousAssessment || null
+        previousAssessment: item.previousAssessment || null,
+        discharge: item.dischargeApplied
+            ? {
+                applied: true,
+                exitApplied: item.dischargeExitApplied ?? null,
+                surplusPercent: item.dischargeSurplusPercent ?? null,
+                dischargeKwh: dischargeSummary?.dischargeKwh ?? null,
+                feedInCredit: dischargeSummary?.feedInCredit ?? null,
+                currency: dischargeSummary?.currency ?? null
+            }
+            : { applied: false }
     };
 }
 
@@ -464,6 +515,7 @@ function aggregateReadings(readings, tariff) {
     }
 
     const credit = exportCredit(tariff, exportKwh);
+    const supplyCharge = supplyChargeForPeriod(tariff, first.Timestamp, last.Timestamp);
 
     return {
         readingCount: readings.length,
@@ -474,7 +526,8 @@ function aggregateReadings(readings, tariff) {
         exportKwh: round2(exportKwh),
         importCost: round2(importCost),
         exportCredit: round2(credit),
-        netCost: round2(importCost - credit),
+        supplyCharge: round2(supplyCharge),
+        netCost: round2(importCost + supplyCharge - credit),
         currency: tariff.currency,
         ...pvSummary(last),
         ...batterySummary(first, last)

@@ -2,19 +2,24 @@
 
 /**
  * SolaX Cloud OpenAPI client — covers Authentication, Information Management,
- * and Monitoring Management (docs/solax-apis.md §1, §2, §4), plus one
- * control/write endpoint: §7 Inverter Work Mode Control's Self Use mode
+ * and Monitoring Management (docs/solax-apis.md §1, §2, §4), plus two
+ * control/write endpoints: §7 Inverter Work Mode Control's Self Use mode
  * (`batch_set_spontaneity_self_use`), used by BatteryControlFunction to adjust
- * the grid-charge target based on tomorrow's weather forecast.
+ * the grid-charge target based on tomorrow's weather forecast; and §9 VPP
+ * Remote Control's SOC Target Control mode (`soc_target_control_mode`) plus
+ * Exit VPP mode (`exit_vpp_mode`), also used by BatteryControlFunction to
+ * pre-emptively discharge surplus SOC (above tonight's charge target) to the
+ * grid before the overnight charge window opens.
  *
  * Every other control/write endpoint (§3 EMS work modes, §6 export/import
- * limits, §8 battery heating, §9 VPP remote control, §10 EV charger control,
- * §11 A1-Hybrid-G2 work mode) is deliberately unimplemented — this app only
- * monitors/recommends beyond that one exception. §9 VPP Remote Control (SOC
- * Target Control + Exit VPP mode) was previously implemented here for
- * GridDischargeFunction's grid-export arbitrage, removed once the premium
- * feed-in window it depended on was confirmed unavailable from this site's
- * retailer.
+ * limits, §8 battery heating, the rest of §9 VPP remote control, §10 EV
+ * charger control, §11 A1-Hybrid-G2 work mode) is deliberately unimplemented —
+ * this app only monitors/recommends beyond those two exceptions. §9 VPP
+ * Remote Control was originally implemented here for GridDischargeFunction's
+ * grid-export arbitrage (removed once the premium feed-in window it depended
+ * on was confirmed unavailable from this site's retailer) — re-added for
+ * BatteryControlFunction's simpler surplus-discharge rule, which needs no
+ * premium rate to be worthwhile.
  */
 
 const BASE_URLS = {
@@ -217,6 +222,36 @@ function setInverterSelfUseMode(baseUrl, accessToken, {
     });
 }
 
+// ─── 9. Inverter Remote Control Mode (VPP) — SOC Target Control + Exit only ─
+// (see file header — every other VPP sub-mode is still unimplemented)
+
+// chargeDischargPower here is +charge/-discharge (docs/solax-apis.md §9) —
+// the OPPOSITE sign convention from the Push Power VPP modes' batteryPower
+// (+discharge/-charge). Easy to get backwards; BatteryControlFunction always
+// passes a negative value to discharge toward targetSoc.
+function setInverterSocTargetMode(baseUrl, accessToken, { snList, businessType, targetSoc, chargeDischargPower }) {
+    return callApi(baseUrl, accessToken, 'POST', '/openapi/v2/device/inverter_vpp_mode/soc_target_control_mode', {
+        body: {
+            snList: Array.isArray(snList) ? snList : [snList],
+            businessType,
+            targetSoc,
+            chargeDischargPower
+        }
+    });
+}
+
+// SOC Target Control has no built-in duration/exit — the inverter holds in
+// VPP override until told otherwise, so this must always be called to hand
+// control back to the inverter's normal Self Use schedule.
+function exitVppMode(baseUrl, accessToken, { snList, businessType }) {
+    return callApi(baseUrl, accessToken, 'POST', '/openapi/v2/device/inverter_vpp_mode/exit_vpp_mode', {
+        body: {
+            snList: Array.isArray(snList) ? snList : [snList],
+            businessType
+        }
+    });
+}
+
 function getDeviceHistoryData(
     baseUrl,
     accessToken,
@@ -248,5 +283,7 @@ module.exports = {
     getPlantStatistics,
     getDeviceRealtimeData,
     getDeviceHistoryData,
-    setInverterSelfUseMode
+    setInverterSelfUseMode,
+    setInverterSocTargetMode,
+    exitVppMode
 };
