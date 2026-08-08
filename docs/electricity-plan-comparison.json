@@ -799,10 +799,24 @@
       "provider": "Nectr",
       "plan_name": "Nectr Power Perks",
       "contract": "No lock-in",
-      "supply_charge_c_per_day": 170.07,
+      "supply_charge_c_per_day": 140.17,
       "usage_charge_c_kwh": 25.25,
-      "solar_fit_c_kwh": "+0",
+      "solar_fit_c_kwh": "+2",
       "greenpower": "none",
+      "loyalty_credit": {
+        "amount_aud": 75,
+        "frequency": "every 6 months",
+        "amount_aud_annual": 150,
+        "note": "Not reflected in estimated_annual_cost_tailored below (Energy Made Easy's own unmodified figure). Original supply_charge_c_per_day (170.07) and solar_fit_c_kwh (+0) also superseded by confirmed current rates above."
+      },
+      "site_specific_recalculation": {
+        "methodology": "supply_charge*365 + total_daily_import_kwh*usage_rate*365 - total_daily_export_kwh*feed_in_rate*365 - loyalty_credit_annual, using the full household usage profile (flat-rate plan, so no overnight-window isolation needed)",
+        "import_kwh_day": 25.11,
+        "export_kwh_day": 15.58,
+        "annual_cost_aud": 2562,
+        "agl_comparison_annual_aud": 1152,
+        "note": "Still ~$1,410/yr more expensive than AGL under the same usage scenario, despite the updated rates and credit — the flat 25.25c/kWh rate on all usage outweighs AGL's 8c/kWh overnight rate covering >95% of this site's actual usage."
+      },
       "estimated_annual_cost_tailored": {
         "was": 2940,
         "now": 2740,

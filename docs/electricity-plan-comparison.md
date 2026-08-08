@@ -135,7 +135,7 @@ All 47 plans from the source comparison, location details stripped. `Est. annual
 | EnergyAustralia | QLD Seniors Offer | 192.01 | 27.97 | +4 | ~~$3040~~ $2650 |
 | Kogan Energy | Kogan Energy with free FIRST | 103.92 | 26.23 | +1 | $2730 |
 | Powershop | Power House | 103.92 | 26.23 | +1 | $2730 |
-| Nectr | Nectr Power Perks | 170.07 | 25.25 | +0 | ~~$2940~~ $2740 |
+| Nectr | Nectr Power Perks | 140.17\* | 25.25 | +2 | ~~$2940~~ $2740 |
 | Alinta Energy | HomeDeal Smart - Single Rate | 168.97 | 24.62 | +2 | $2760 |
 | Flipped Energy | Anytime Switched On 2.2! | 118.6 | 27.32 | +2 | ~~$2820~~ $2790 |
 | ENGIE | QLD _ ENGIE Perks Elec | 192.01 | block: 27.97c first 13kWh/day, 27.97c thereafter (identical tiers - effectively flat) | +1 | ~~$3210~~ $2880 |
@@ -154,6 +154,8 @@ All 47 plans from the source comparison, location details stripped. `Est. annual
 | 1st Energy | 1st Quartz - Single Rate | 188.1 | 27.39 | tiered: 1c first 5kWh/day, 0.1c thereafter | $3190 |
 | Dodo | Residential Standing | 192.02 | 27.97 | +1 | $3210 |
 | Energy Locals Urban | Standing Offer | 192.02 | 27.97 | +0 | $3260 |
+
+\* Nectr Power Perks: supply charge and feed-in updated from the original Energy Made Easy figures (170.07c/day, 0c feed-in) to confirmed current rates (140.17c/day, 2c feed-in). Also carries a $75 loyalty credit every 6 months ($150/yr), not reflected in the `Est. annual (tailored)` column above (that's Energy Made Easy's own unmodified estimate). Recalculated against this site's full household usage profile (25.11 kWh/day import, 15.58 kWh/day export — the only true total-daily figure on file, since this is a flat-rate plan and the site's overnight-window-specific "observed telemetry" figure elsewhere doesn't apply): **$2,562/yr net of the credit**, still ~$1,410/yr more expensive than AGL's $1,152/yr under the same scenario — the 25.25c/kWh flat rate applying to *all* usage, versus AGL's 8c/kWh covering the >95% of usage concentrated overnight, dwarfs the improvement from the updated supply/feed-in/credit.
 
 ### Known limitations of the source data
 
