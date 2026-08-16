@@ -29,6 +29,33 @@ const LOW_SOC_THRESHOLD = 30;
 // the latest one on the dashboard.
 const REPORT_RECORD_PREFIX = 'REPORT#';
 
+// Read-only here — the sentinel prefixes BatteryControlFunction/
+// SettingsOptimizerFunction already write their own per-run records under.
+// This function is now the one place that emails a nightly summary, so it
+// folds the latest of each into the same email rather than each of those
+// functions sending its own (see CLAUDE.md's "Battery charge control"/
+// "Settings optimizer" sections).
+const BATTERY_STATUS_RECORD_PREFIX = 'BATTERY_CONTROL#';
+const SETTINGS_OPTIMIZATION_RECORD_PREFIX = 'SETTINGS_OPTIMIZATION#';
+
+// The nightly sequence this digest is folding together runs decide (~21:00)
+// -> SettingsOptimizer (~22:00) -> exitDischarge (~23:55, conditional) ->
+// this report (~02:00 next day) — roughly a 5h gap from the first decision
+// to here. 10h comfortably covers that plus cron jitter, while still
+// excluding a genuinely missing/failed prior night's record from being
+// reported as if it were tonight's.
+const DIGEST_RECORD_MAX_AGE_SECONDS = 10 * 60 * 60;
+
+// Mirrors SettingsOptimizerFunction.SETTING_LABELS — duplicated rather than
+// shared since each Lambda is an independent deployment package (see
+// CLAUDE.md's per-Lambda structure) and this is the only other place that
+// needs human-facing labels for these keys.
+const SETTINGS_OPTIMIZER_LABELS = {
+    chargeUpperSocSunny: 'Overnight charge target (sunny forecast)',
+    chargeUpperSocPartlyCloudy: 'Overnight charge target (partly cloudy forecast)',
+    chargeUpperSocOvercast: 'Overnight charge target (overcast forecast)'
+};
+
 const AI_SYSTEM_PROMPT = `You are an energy analyst for a home solar + battery system. The household also \
 owns an electric vehicle that is often plugged in to charge overnight (00:00-06:00, the night-ev-charge \
 tariff window) — its charging draws from the grid independently of the battery, varies night to night (not \
@@ -74,7 +101,17 @@ exports.handler = async (event) => {
         const assessment = assessUsage(readings, tariff);
         const aiInsights = await getAiInsights(assessment, tariff, deviceSn, endSeconds);
         const recommendationText = recommendation(assessment, tariff);
-        const report = formatReport(assessment, tariff, LOOKBACK_DAYS, aiInsights);
+
+        const [batteryControlRecord, settingsOptimizationRecord] = await Promise.all([
+            queryLatestSentinelRecord(`${BATTERY_STATUS_RECORD_PREFIX}${deviceSn}`),
+            queryLatestSentinelRecord(`${SETTINGS_OPTIMIZATION_RECORD_PREFIX}${deviceSn}`)
+        ]);
+
+        const report = formatReport(
+            assessment, tariff, LOOKBACK_DAYS, aiInsights,
+            freshOrNull(batteryControlRecord, endSeconds),
+            freshOrNull(settingsOptimizationRecord, endSeconds)
+        );
 
         if (sendEmail) {
             await snsClient.send(new PublishCommand({
@@ -122,6 +159,28 @@ async function queryReadings(deviceSn, startSeconds, endSeconds) {
     } while (exclusiveStartKey);
 
     return readings;
+}
+
+// Same sentinel-record lookup DashboardApiFunction already does for the
+// dashboard — duplicated locally rather than shared for the same
+// independent-deployment-package reason as SETTINGS_OPTIMIZER_LABELS above.
+async function queryLatestSentinelRecord(sentinelDeviceSn) {
+    const result = await docClient.send(new QueryCommand({
+        TableName: process.env.ENERGY_READINGS_TABLE,
+        KeyConditionExpression: 'DeviceSn = :sn',
+        ExpressionAttributeValues: { ':sn': sentinelDeviceSn },
+        ScanIndexForward: false,
+        Limit: 1
+    }));
+    return result.Items?.[0] || null;
+}
+
+// A missing or stale record degrades the digest section gracefully (see
+// formatBatteryControlSummary/formatSettingsOptimizerSummary) rather than
+// reporting a genuinely old decision as if it were tonight's.
+function freshOrNull(record, nowSeconds) {
+    if (!record || (nowSeconds - record.Timestamp) > DIGEST_RECORD_MAX_AGE_SECONDS) return null;
+    return record;
 }
 
 function assessUsage(readings, tariff) {
@@ -270,13 +329,69 @@ function parseAiResponse(text) {
     };
 }
 
+// batteryControlRecord/settingsOptimizationRecord are the pre-staleness-
+// checked (see freshOrNull) latest BATTERY_CONTROL#/SETTINGS_OPTIMIZATION#
+// records — this is now the one nightly email for all three functions
+// (BatteryControlFunction/SettingsOptimizerFunction no longer send their
+// own), so their sections fold in here rather than arriving as separate
+// emails. Both are optional/nullable — a missing or stale record just means
+// that section reports "no recent decision" instead of failing the report.
+function formatBatteryControlSummary(record) {
+    if (!record) return ['No recent battery-control decision recorded.'];
+
+    const lines = [];
+    if (record.classification === 'disabled') {
+        lines.push(`Automation disabled — holding chargeUpperSoc at ${record.chargeUpperSoc}%.`);
+    } else {
+        lines.push(
+            `Forecast: ${record.classification} → chargeUpperSoc ${record.chargeUpperSoc}% ` +
+            `(${record.dryRun ? 'dry-run' : 'applied'})`
+        );
+    }
+
+    if (record.dischargeApplied) {
+        const status = record.dischargeExitApplied
+            ? 'discharged and exited'
+            : (record.dryRun ? 'would discharge' : 'discharge pending exit');
+        lines.push(`Surplus discharge: ${record.dischargeSurplusPercent}% above target — ${status}.`);
+    }
+
+    if (record.previousAssessment?.accurate === false) {
+        lines.push(`Last night's target looked off in hindsight: ${record.previousAssessment.assessment}`);
+    }
+
+    return lines;
+}
+
+function formatSettingsOptimizerSummary(record) {
+    if (!record) return ['No recent settings-optimizer recommendation recorded.'];
+
+    const changed = Object.entries(record.recommendations || {})
+        .filter(([, r]) => r.recommended !== null && r.recommended !== r.current);
+
+    if (changed.length === 0) {
+        return ['No change recommended.'];
+    }
+
+    const lines = changed.map(([key, r]) =>
+        `${SETTINGS_OPTIMIZER_LABELS[key] || key}: ${r.current}% -> ${r.recommended}%${r.clamped ? ' (capped)' : ''} — ` +
+        `${record.applied ? 'applied' : 'recommended, not yet applied'}`
+    );
+
+    if (record.reasoning) {
+        lines.push(`Reasoning (confidence: ${record.confidence}): ${record.reasoning}`);
+    }
+
+    return lines;
+}
+
 // Dot-point email body — deliberately terser than the data actually available
 // (e.g. zero-import windows are skipped, the cost breakdown is one line not
 // three). recommendation()/aiInsights text itself is embedded verbatim, never
 // reworded here, since DashboardApiFunction serves those exact same strings
 // to the website via buildReportRecord — only this wrapper's formatting
 // differs between the two surfaces.
-function formatReport(assessment, tariff, lookbackDays, aiInsights) {
+function formatReport(assessment, tariff, lookbackDays, aiInsights, batteryControlRecord, settingsOptimizationRecord) {
     const lines = [
         `PowerPlant usage report — last ${lookbackDays} day(s)`,
         '',
@@ -302,6 +417,12 @@ function formatReport(assessment, tariff, lookbackDays, aiInsights) {
     );
 
     lines.push('', recommendation(assessment, tariff));
+
+    lines.push('', 'Battery control (tonight):');
+    for (const line of formatBatteryControlSummary(batteryControlRecord)) lines.push(`• ${line}`);
+
+    lines.push('', 'Settings optimizer:');
+    for (const line of formatSettingsOptimizerSummary(settingsOptimizationRecord)) lines.push(`• ${line}`);
 
     if (aiInsights) {
         lines.push('', 'AI insights:', `• ${aiInsights.narrative}`);
@@ -362,9 +483,15 @@ function round2(n) {
 
 module.exports.assessUsage = assessUsage;
 module.exports.formatReport = formatReport;
+module.exports.formatBatteryControlSummary = formatBatteryControlSummary;
+module.exports.formatSettingsOptimizerSummary = formatSettingsOptimizerSummary;
 module.exports.dailySummaries = dailySummaries;
 module.exports.parseAiResponse = parseAiResponse;
 module.exports.getAiInsights = getAiInsights;
 module.exports.recommendation = recommendation;
 module.exports.buildReportRecord = buildReportRecord;
+module.exports.freshOrNull = freshOrNull;
 module.exports.REPORT_RECORD_PREFIX = REPORT_RECORD_PREFIX;
+module.exports.BATTERY_STATUS_RECORD_PREFIX = BATTERY_STATUS_RECORD_PREFIX;
+module.exports.SETTINGS_OPTIMIZATION_RECORD_PREFIX = SETTINGS_OPTIMIZATION_RECORD_PREFIX;
+module.exports.DIGEST_RECORD_MAX_AGE_SECONDS = DIGEST_RECORD_MAX_AGE_SECONDS;

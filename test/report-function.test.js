@@ -5,11 +5,15 @@ const path = require('path');
 const {
     assessUsage,
     formatReport,
+    formatBatteryControlSummary,
+    formatSettingsOptimizerSummary,
     dailySummaries,
     parseAiResponse,
     recommendation,
     buildReportRecord,
-    REPORT_RECORD_PREFIX
+    freshOrNull,
+    REPORT_RECORD_PREFIX,
+    DIGEST_RECORD_MAX_AGE_SECONDS
 } = require('../lambda/ReportFunction/ReportFunction');
 
 const config = JSON.parse(
@@ -284,5 +288,156 @@ describe('ReportFunction recommendation (exported directly)', () => {
         const report = formatReport(assessment, config.tariff, 1);
 
         expect(report).toContain(text);
+    });
+});
+
+// BatteryControlFunction/SettingsOptimizerFunction no longer send their own
+// nightly emails — ReportFunction is now the single nightly digest, folding
+// their latest stored records in via these two formatters (see CLAUDE.md's
+// "Battery charge control"/"Settings optimizer" sections).
+describe('ReportFunction formatBatteryControlSummary', () => {
+    test('reports no recent decision when no record is available', () => {
+        expect(formatBatteryControlSummary(null)).toEqual(['No recent battery-control decision recorded.']);
+    });
+
+    test('summarizes a dry-run forecast decision', () => {
+        const lines = formatBatteryControlSummary({
+            classification: 'sunny', chargeUpperSoc: 40, dryRun: true, dischargeApplied: false
+        });
+        expect(lines).toEqual(["Forecast: sunny → chargeUpperSoc 40% (dry-run)"]);
+    });
+
+    test('summarizes an applied (live) decision', () => {
+        const lines = formatBatteryControlSummary({
+            classification: 'overcast', chargeUpperSoc: 100, dryRun: false, dischargeApplied: false
+        });
+        expect(lines).toEqual(["Forecast: overcast → chargeUpperSoc 100% (applied)"]);
+    });
+
+    test('summarizes a disabled decision without a forecast classification line', () => {
+        const lines = formatBatteryControlSummary({
+            classification: 'disabled', chargeUpperSoc: 100, dryRun: true, dischargeApplied: false
+        });
+        expect(lines).toEqual(['Automation disabled — holding chargeUpperSoc at 100%.']);
+    });
+
+    test('adds a surplus-discharge line when a discharge was engaged and already exited', () => {
+        const lines = formatBatteryControlSummary({
+            classification: 'sunny', chargeUpperSoc: 40, dryRun: false,
+            dischargeApplied: true, dischargeSurplusPercent: 40, dischargeExitApplied: true
+        });
+        expect(lines).toContain('Surplus discharge: 40% above target — discharged and exited.');
+    });
+
+    test('reports a discharge as pending exit when applied live but not yet exited', () => {
+        const lines = formatBatteryControlSummary({
+            classification: 'sunny', chargeUpperSoc: 40, dryRun: false,
+            dischargeApplied: true, dischargeSurplusPercent: 40, dischargeExitApplied: false
+        });
+        expect(lines).toContain('Surplus discharge: 40% above target — discharge pending exit.');
+    });
+
+    test('reports a dry-run discharge as "would discharge"', () => {
+        const lines = formatBatteryControlSummary({
+            classification: 'sunny', chargeUpperSoc: 40, dryRun: true,
+            dischargeApplied: true, dischargeSurplusPercent: 40, dischargeExitApplied: false
+        });
+        expect(lines).toContain('Surplus discharge: 40% above target — would discharge.');
+    });
+
+    test('adds a hindsight-accuracy line only when previousAssessment judged the decision inaccurate', () => {
+        const inaccurate = formatBatteryControlSummary({
+            classification: 'sunny', chargeUpperSoc: 40, dryRun: true, dischargeApplied: false,
+            previousAssessment: { accurate: false, assessment: 'Ran flat before solar caught up.' }
+        });
+        expect(inaccurate).toContain("Last night's target looked off in hindsight: Ran flat before solar caught up.");
+
+        const accurate = formatBatteryControlSummary({
+            classification: 'sunny', chargeUpperSoc: 40, dryRun: true, dischargeApplied: false,
+            previousAssessment: { accurate: true, assessment: 'Fine.' }
+        });
+        expect(accurate.join('\n')).not.toContain('looked off in hindsight');
+    });
+});
+
+describe('ReportFunction formatSettingsOptimizerSummary', () => {
+    test('reports no recent recommendation when no record is available', () => {
+        expect(formatSettingsOptimizerSummary(null)).toEqual(['No recent settings-optimizer recommendation recorded.']);
+    });
+
+    test('reports no change when nothing in the record differs from current', () => {
+        const lines = formatSettingsOptimizerSummary({
+            recommendations: { chargeUpperSocSunny: { current: 40, recommended: null } },
+            applied: false, autoApply: false
+        });
+        expect(lines).toEqual(['No change recommended.']);
+    });
+
+    test('summarizes a recommended-but-not-applied change with its human-readable label', () => {
+        const lines = formatSettingsOptimizerSummary({
+            recommendations: { chargeUpperSocSunny: { current: 40, recommended: 45, clamped: false } },
+            applied: false, autoApply: false, confidence: 'medium', reasoning: 'Sunny nights ran flat twice.'
+        });
+        expect(lines[0]).toBe('Overnight charge target (sunny forecast): 40% -> 45% — recommended, not yet applied');
+        expect(lines).toContain('Reasoning (confidence: medium): Sunny nights ran flat twice.');
+    });
+
+    test('marks a change as applied when autoApply engaged it', () => {
+        const lines = formatSettingsOptimizerSummary({
+            recommendations: { chargeUpperSocOvercast: { current: 100, recommended: 90, clamped: false } },
+            applied: true, autoApply: true, confidence: 'high', reasoning: 'Consistently ran flat.'
+        });
+        expect(lines[0]).toContain('90% — applied');
+    });
+
+    test('flags a clamped recommendation', () => {
+        const lines = formatSettingsOptimizerSummary({
+            recommendations: { chargeUpperSocSunny: { current: 40, recommended: 55, clamped: true } },
+            applied: false, autoApply: false
+        });
+        expect(lines[0]).toContain('(capped)');
+    });
+});
+
+describe('ReportFunction freshOrNull', () => {
+    test('returns null when there is no record', () => {
+        expect(freshOrNull(null, 1000)).toBeNull();
+    });
+
+    test('returns the record when well within the staleness window', () => {
+        const record = { Timestamp: 1000 };
+        expect(freshOrNull(record, 1000 + 3600)).toBe(record);
+    });
+
+    test('returns null once the record is older than DIGEST_RECORD_MAX_AGE_SECONDS', () => {
+        const record = { Timestamp: 1000 };
+        expect(freshOrNull(record, 1000 + DIGEST_RECORD_MAX_AGE_SECONDS + 1)).toBeNull();
+    });
+});
+
+describe('ReportFunction formatReport (digest sections)', () => {
+    test('includes battery-control and settings-optimizer sections, degrading gracefully when neither record is available', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const report = formatReport(assessment, config.tariff, 1, null, null, null);
+
+        expect(report).toContain('Battery control (tonight):');
+        expect(report).toContain('No recent battery-control decision recorded.');
+        expect(report).toContain('Settings optimizer:');
+        expect(report).toContain('No recent settings-optimizer recommendation recorded.');
+    });
+
+    test('folds in real battery-control and settings-optimizer records', () => {
+        const assessment = assessUsage(readings, config.tariff);
+        const report = formatReport(
+            assessment, config.tariff, 1, null,
+            { classification: 'sunny', chargeUpperSoc: 40, dryRun: true, dischargeApplied: false },
+            {
+                recommendations: { chargeUpperSocSunny: { current: 40, recommended: 45, clamped: false } },
+                applied: false, autoApply: false, confidence: 'medium', reasoning: 'Sunny nights ran flat twice.'
+            }
+        );
+
+        expect(report).toContain('Forecast: sunny → chargeUpperSoc 40% (dry-run)');
+        expect(report).toContain('Overnight charge target (sunny forecast): 40% -> 45% — recommended, not yet applied');
     });
 });

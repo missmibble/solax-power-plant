@@ -447,7 +447,7 @@ describe('BatteryControlFunction', () => {
     });
 
     describe('handler (dry run)', () => {
-        test('publishes a DRY RUN message, stores a status record, and never calls the control endpoint', async () => {
+        test('stores a status record without emailing, and never calls the control endpoint', async () => {
             global.fetch.mockResolvedValue({
                 json: async () => openMeteoHourlyResponse({ precipitation: [1] })
             });
@@ -457,11 +457,7 @@ describe('BatteryControlFunction', () => {
             expect(result.statusCode).toBe(200);
             expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
             expect(mockGetAccessToken).not.toHaveBeenCalled();
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.TopicArn).toBe(process.env.REPORTS_TOPIC_ARN);
-            expect(publishCall.input.Subject).toContain('DRY RUN');
-            expect(publishCall.input.Message).toContain("Would set tonight's battery charge target to 100%");
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.TableName).toBe(process.env.ENERGY_READINGS_TABLE);
@@ -483,8 +479,7 @@ describe('BatteryControlFunction', () => {
 
             await handler();
 
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Message).toContain("Would set tonight's battery charge target to 70%");
+            expect(mockSnsSend).not.toHaveBeenCalled();
 
             const putCall = findPutCall();
             expect(putCall.input.Item.classification).toBe('partly-cloudy');
@@ -493,7 +488,7 @@ describe('BatteryControlFunction', () => {
     });
 
     describe('handler (live)', () => {
-        test('calls the control endpoint and publishes an "applied" message when dryRun is false', async () => {
+        test('calls the control endpoint and stores an "applied" status record when dryRun is false', async () => {
             process.env.BATTERY_CONTROL_CONFIG = JSON.stringify({ ...BASELINE_CONFIG, dryRun: false });
             ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
 
@@ -511,10 +506,7 @@ describe('BatteryControlFunction', () => {
             const [, , request] = mockSetInverterSelfUseMode.mock.calls[0];
             expect(request.chargeUpperSoc).toBe(40);
             expect(request.snList).toBe(process.env.SOLAX_INVERTER_SN);
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('applied');
-            expect(publishCall.input.Message).toContain("Set tonight's battery charge target to 40%");
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.Item.classification).toBe('sunny');
@@ -583,9 +575,7 @@ describe('BatteryControlFunction', () => {
             expect(result.statusCode).toBe(200);
             expect(global.fetch).not.toHaveBeenCalled(); // no forecast call needed when disabled
             expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled(); // dryRun: true by default
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('DRY RUN');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.Item.enabled).toBe(false);
@@ -629,7 +619,7 @@ describe('BatteryControlFunction', () => {
     });
 
     describe('handler (surplus discharge)', () => {
-        test('dry run: does not call any control endpoint, stores dischargeApplied, message mentions the discharge', async () => {
+        test('dry run: does not call any control endpoint, stores dischargeApplied, and does not email', async () => {
             mockDynamoSend.mockImplementation(dynamoImplWithReading(80));
             global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) }); // clear -> sunny -> 40% target; 80% SOC is 40 points above
 
@@ -639,10 +629,7 @@ describe('BatteryControlFunction', () => {
             expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
             expect(mockSetInverterSocTargetMode).not.toHaveBeenCalled();
             expect(mockGetAccessToken).not.toHaveBeenCalled();
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('DRY RUN');
-            expect(publishCall.input.Message).toContain('would discharge');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.Item.dischargeApplied).toBe(true);
@@ -652,7 +639,7 @@ describe('BatteryControlFunction', () => {
             expect(putCall.input.Item.applied).toBe(false);
         });
 
-        test('live: calls setInverterSocTargetMode to discharge, and does not set self-use mode this run', async () => {
+        test('live: calls setInverterSocTargetMode to discharge, does not set self-use mode this run, and does not email', async () => {
             process.env.BATTERY_CONTROL_CONFIG = JSON.stringify({ ...BASELINE_CONFIG, dryRun: false });
             mockDynamoSend.mockImplementation(dynamoImplWithReading(80));
 
@@ -669,10 +656,7 @@ describe('BatteryControlFunction', () => {
             const [, , request] = mockSetInverterSocTargetMode.mock.calls[0];
             expect(request.targetSoc).toBe(40);
             expect(request.chargeDischargPower).toBe(-3000); // negative = discharge, default maxDischargePowerW
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('applied');
-            expect(publishCall.input.Message).toContain('discharging');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.Item.dischargeApplied).toBe(true);
@@ -753,7 +737,7 @@ describe('BatteryControlFunction', () => {
             expect(mockExitVppMode).not.toHaveBeenCalled();
         });
 
-        test('dry run: publishes a DRY RUN exit message without calling the control endpoint', async () => {
+        test('dry run: stores dischargeExitApplied: false without calling the control endpoint or emailing', async () => {
             mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(freshRecord({ dryRun: true })));
 
             const result = await handler({ phase: 'exitDischarge' });
@@ -761,15 +745,13 @@ describe('BatteryControlFunction', () => {
             expect(result.statusCode).toBe(200);
             expect(mockExitVppMode).not.toHaveBeenCalled();
             expect(mockSetInverterSelfUseMode).not.toHaveBeenCalled();
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('DRY RUN exit');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.Item.dischargeExitApplied).toBe(false);
         });
 
-        test('live: exits VPP mode, then sets self-use mode with the stored chargeUpperSoc', async () => {
+        test('live: exits VPP mode, then sets self-use mode with the stored chargeUpperSoc, without emailing', async () => {
             mockDynamoSend.mockImplementation(dynamoImplWithStatusRecord(freshRecord({ dryRun: false, chargeUpperSoc: 55 })));
             mockSsmSend.mockResolvedValue({ Parameter: { Value: 'secret-value' } });
             mockGetAccessToken.mockResolvedValue('access-token');
@@ -783,9 +765,7 @@ describe('BatteryControlFunction', () => {
             expect(mockSetInverterSelfUseMode).toHaveBeenCalledTimes(1);
             const [, , request] = mockSetInverterSelfUseMode.mock.calls[0];
             expect(request.chargeUpperSoc).toBe(55);
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('exit applied');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const putCall = findPutCall();
             expect(putCall.input.Item.dischargeExitApplied).toBe(true);

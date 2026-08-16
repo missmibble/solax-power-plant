@@ -108,9 +108,10 @@ Each `decide` run, before deciding tonight's target: looks up the last stored de
 
 ## Dry run vs. live
 
-- `dryRun: true` (default): computes forecast/classification/discharge-check, logs, emails "DRY RUN" — never calls SolaX, in either phase or either branch.
-- `dryRun: false`: calls SolaX for real at each applicable step, emails "applied".
-- Any failure → publishes to the alerts SNS topic and the Lambda errors (`BatteryControlFunctionErrorAlarm`).
+- `dryRun: true` (default): computes forecast/classification/discharge-check, logs, and stores the decision as a `BATTERY_CONTROL#<inverterSn>` record — never calls SolaX, in either phase or either branch.
+- `dryRun: false`: calls SolaX for real at each applicable step, and stores the same record with `dryRun: false`/`applied: true`.
+- Neither branch emails on success — `ReportFunction`'s nightly report is the one place that emails a summary now, folding in the latest of this function's stored decisions (see its "Battery control (tonight)" section, `ReportFunction.formatBatteryControlSummary`). The dashboard's battery-status widget also reads this same stored record directly, independent of the email.
+- Any failure → publishes to the alerts SNS topic and the Lambda errors (`BatteryControlFunctionErrorAlarm`) — this is the one path that still emails immediately, since it's exceptional rather than a routine nightly outcome.
 
 ## Dashboard-editable settings
 

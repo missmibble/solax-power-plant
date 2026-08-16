@@ -182,38 +182,6 @@ function buildRecommendations({ currentValues, batterySummary, aiRecommendation,
     };
 }
 
-// Plain-English labels for the emailed summary — the recommendations object
-// itself stays keyed by these config field names (other code reads it by
-// key), only the human-facing text needs translating.
-const SETTING_LABELS = {
-    chargeUpperSocSunny: 'Overnight charge target (sunny forecast)',
-    chargeUpperSocPartlyCloudy: 'Overnight charge target (partly cloudy forecast)',
-    chargeUpperSocOvercast: 'Overnight charge target (overcast forecast)'
-};
-
-function formatMessage(recommendations, aiRecommendation, autoApply) {
-    const lines = [];
-    const changed = Object.entries(recommendations).filter(([, r]) => r.recommended !== null && r.recommended !== r.current);
-
-    if (changed.length === 0) {
-        lines.push('No changes recommended this week — either not enough sample nights yet, or current values look right.');
-    } else {
-        for (const [key, r] of changed) {
-            lines.push(
-                `${SETTING_LABELS[key] || key}: ${r.current}% -> ${r.recommended}%${r.clamped ? ' (capped)' : ''} ` +
-                `(${r.sampleSize} sample night${r.sampleSize === 1 ? '' : 's'})`
-                + `${autoApply ? ' — applied' : ' — recommended, not yet applied'}`
-            );
-        }
-    }
-
-    if (aiRecommendation?.reasoning) {
-        lines.push('', `Reasoning (confidence: ${aiRecommendation.confidence}): ${aiRecommendation.reasoning}`);
-    }
-
-    return lines.join('\n');
-}
-
 function buildOptimizationRecord(deviceSn, timestampSeconds, fields) {
     return {
         DeviceSn: `${STATUS_RECORD_PREFIX}${deviceSn}`,
@@ -330,10 +298,8 @@ exports.handler = async () => {
             applied = await applyRecommendations(deviceSn, recommendations, batteryOverride);
         }
 
-        const message = formatMessage(recommendations, aiRecommendation, effectiveAutoApply);
         logInfo('Settings optimization recommendation', { recommendations, applied, autoApply: effectiveAutoApply });
 
-        await publish(process.env.REPORTS_TOPIC_ARN, `PowerPlant settings optimizer${applied ? ' — applied' : ''}`, message);
         await storeStatusRecord(buildOptimizationRecord(deviceSn, nowSeconds, {
             recommendations, aiRecommendation, applied, autoApply: effectiveAutoApply,
             reasoning: aiRecommendation?.reasoning || 'No parsable recommendation returned.'

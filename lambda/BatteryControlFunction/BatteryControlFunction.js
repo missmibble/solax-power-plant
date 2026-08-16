@@ -168,27 +168,6 @@ function buildSelfUseModeRequest(batteryControlConfig, chargeUpperSoc) {
     };
 }
 
-// dischargePlan is only ever non-null (and only ever adds its line) when
-// buildSurplusDischargePlan decided current SOC has enough surplus above
-// tonight's target to be worth exporting — see "Pre-emptive surplus
-// discharge" in docs/battery-charge-logic.md.
-function formatMessage(classification, reasoning, requestBody, dryRun, dischargePlan) {
-    const classificationLabel = classification === 'disabled' ? 'Automation disabled' : `Tomorrow's forecast: ${classification}`;
-    const lines = [classificationLabel, reasoning, ''];
-
-    if (dischargePlan?.shouldDischarge) {
-        lines.push(
-            `Battery is at ${dischargePlan.currentSoc}%, ${dischargePlan.surplusPercent} points above tonight's ` +
-            `${requestBody.chargeUpperSoc}% target — ${dryRun ? 'would discharge' : 'discharging'} the surplus to ` +
-            `the grid now, then resuming the normal overnight schedule at ~23:55.`
-        );
-    } else {
-        lines.push(`${dryRun ? 'Would set' : 'Set'} tonight's battery charge target to ${requestBody.chargeUpperSoc}%.`);
-    }
-
-    return lines.join('\n');
-}
-
 async function publish(topicArn, subject, message) {
     await snsClient.send(new PublishCommand({ TopicArn: topicArn, Subject: subject, Message: message }));
 }
@@ -502,8 +481,6 @@ async function handleDecide(deviceSn, nowSeconds) {
         }
     }
 
-    const message = formatMessage(classification, reasoning, requestBody, dryRun, dischargePlan);
-
     if (dischargePlan?.shouldDischarge) {
         // VPP SOC Target Control holds the inverter in override indefinitely
         // once set (see solax-client.js) — calling setInverterSelfUseMode in
@@ -527,11 +504,6 @@ async function handleDecide(deviceSn, nowSeconds) {
         logInfo(`Battery control ${dryRun ? 'dry run' : 'applied'} (surplus discharge)`, {
             classification, reasoning, dischargePlan, enabled: effective.enabled
         });
-        await publish(
-            process.env.REPORTS_TOPIC_ARN,
-            `PowerPlant battery control — ${dryRun ? 'DRY RUN (no change applied)' : 'applied'}`,
-            message
-        );
         await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
             classification, reasoning, chargeUpperSoc, dryRun, applied: !dryRun, enabled: effective.enabled,
             appliesToDate, previousAssessment,
@@ -544,7 +516,6 @@ async function handleDecide(deviceSn, nowSeconds) {
     // — set the overnight self-use mode now, exactly as before this rule existed.
     if (dryRun) {
         logInfo('Battery control dry run', { classification, reasoning, requestBody, enabled: effective.enabled });
-        await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant battery control — DRY RUN (no change applied)', message);
         await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
             classification, reasoning, chargeUpperSoc, dryRun: true, applied: false, enabled: effective.enabled,
             appliesToDate, previousAssessment, dischargeApplied: false
@@ -564,7 +535,6 @@ async function handleDecide(deviceSn, nowSeconds) {
     });
 
     logInfo('Battery control applied', { classification, reasoning, requestBody, enabled: effective.enabled });
-    await publish(process.env.REPORTS_TOPIC_ARN, 'PowerPlant battery control — applied', message);
     await storeBatteryStatusRecord(buildBatteryStatusRecord(deviceSn, nowSeconds, {
         classification, reasoning, chargeUpperSoc, dryRun: false, applied: true, enabled: effective.enabled,
         appliesToDate, previousAssessment, dischargeApplied: false
@@ -590,8 +560,6 @@ async function handleExitDischarge(deviceSn, nowSeconds) {
 
     const batteryControlConfig = JSON.parse(process.env.BATTERY_CONTROL_CONFIG);
     const requestBody = buildSelfUseModeRequest(batteryControlConfig, record.chargeUpperSoc);
-    const message = `${record.dryRun ? 'Would exit' : 'Exited'} VPP override and ` +
-        `${record.dryRun ? 'set' : 'setting'} tonight's charge target (${record.chargeUpperSoc}%) for the overnight window.`;
 
     if (!record.dryRun) {
         const { clientId, clientSecret } = await loadSolaxCredentials();
@@ -604,11 +572,6 @@ async function handleExitDischarge(deviceSn, nowSeconds) {
     }
 
     logInfo(`Battery control exitDischarge ${record.dryRun ? 'dry run' : 'applied'}`, { requestBody });
-    await publish(
-        process.env.REPORTS_TOPIC_ARN,
-        `PowerPlant battery control — ${record.dryRun ? 'DRY RUN exit (no change applied)' : 'exit applied'}`,
-        message
-    );
 
     await docClient.send(new PutCommand({
         TableName: process.env.ENERGY_READINGS_TABLE,

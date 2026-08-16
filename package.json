@@ -12,6 +12,7 @@
     "test": "jest",
     "install-all": "for d in lambda/*/ ; do (cd \"$d\" && echo \"Installing in $d\" && npm install); done",
     "deploy:dev": "bash scripts/deploy.sh dev",
+    "deploy:local": "bash scripts/deploy.sh --config dev-powerplant.local.json",
     "diff": "cdk diff",
     "synth": "cdk synth"
   },

@@ -255,7 +255,7 @@ describe('SettingsOptimizerFunction', () => {
             expect(mockBedrockSend).not.toHaveBeenCalled();
         });
 
-        test('recommendation-only run: computes and emails, but never writes settings-override rows', async () => {
+        test('recommendation-only run: computes and stores a status record, but never emails or writes settings-override rows', async () => {
             mockBedrockSend.mockResolvedValue(bedrockTextResponse(validAiResponseText({
                 chargeUpperSocSunny: 45, confidence: 'medium', reasoning: 'Sunny nights ran flat.'
             })));
@@ -279,13 +279,11 @@ describe('SettingsOptimizerFunction', () => {
 
             expect(result.statusCode).toBe(200);
             expect(findPutCalls().filter(c => c.input.Item.DeviceSn.includes('SETTINGS#'))).toHaveLength(0);
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Message).toContain('recommended, not yet applied');
-            expect(publishCall.input.Message).toContain('Overnight charge target (sunny forecast): 40% -> 45%');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
             expect(statusPut.input.Item.applied).toBe(false);
+            expect(statusPut.input.Item.recommendations.chargeUpperSocSunny.recommended).toBe(45);
         });
 
         test('a dashboard-saved autoApply: true override applies the recommendation even though config.autoApply is false', async () => {
@@ -391,9 +389,7 @@ describe('SettingsOptimizerFunction', () => {
             expect(batteryPut.input.Item.enabled).toBe(false); // preserved from the existing override
             expect(batteryPut.input.Item.chargeUpperSocOvercast).toBe(100); // preserved
             expect(batteryPut.input.Item.sources.chargeUpperSocSunny).toBe('settings-optimizer');
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).toContain('applied');
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
         });
 
         test('autoApply run: preserves an existing sources entry for a field it did not touch this run', async () => {
@@ -493,13 +489,10 @@ describe('SettingsOptimizerFunction', () => {
             await handler();
 
             expect(findPutCalls().filter(c => c.input.Item.DeviceSn.includes('SETTINGS#'))).toHaveLength(0);
+            expect(mockSnsSend).not.toHaveBeenCalled(); // success no longer emails — ReportFunction's nightly digest covers it
 
             const statusPut = findPutCalls().find(c => c.input.Item.DeviceSn.startsWith(STATUS_RECORD_PREFIX));
             expect(statusPut.input.Item.applied).toBe(false);
-
-            const publishCall = mockSnsSend.mock.calls[0][0];
-            expect(publishCall.input.Subject).not.toContain('applied');
-            expect(publishCall.input.Message).toContain('No changes recommended');
         });
 
         test('passes minSampleSize to the model so its reasoning can stay consistent with the code-enforced gate', async () => {
