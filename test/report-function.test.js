@@ -12,6 +12,7 @@ const {
     recommendation,
     buildReportRecord,
     freshOrNull,
+    householdContext,
     REPORT_RECORD_PREFIX,
     DIGEST_RECORD_MAX_AGE_SECONDS
 } = require('../lambda/ReportFunction/ReportFunction');
@@ -225,6 +226,43 @@ describe('ReportFunction dailySummaries', () => {
         const summaries = dailySummaries(resetReadings, config.tariff);
 
         expect(summaries).toEqual([{ date: '2026-07-30', pvYieldKwh: 0, importKwh: 1, exportKwh: 0 }]);
+    });
+
+    test('omits householdSize entirely when no household settings are provided', () => {
+        const summaries = dailySummaries(readings, config.tariff);
+        expect(summaries[0].householdSize).toBeUndefined();
+    });
+
+    test('tags each day with the household size in effect that day when household settings are present', () => {
+        const twoDayReadings = [
+            { Timestamp: utcSeconds(5, 0), totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5 },
+            { Timestamp: utcSeconds(18, 0), totalYield: 105, totalImportEnergy: 53, totalExportEnergy: 6 },
+            // next local day (2026-07-31), on/after the household change
+            { Timestamp: utcSeconds(24 + 5, 0), totalYield: 108, totalImportEnergy: 55, totalExportEnergy: 6.5 }
+        ];
+        const household = { householdSize: 2, priorHouseholdSize: 4, effectiveSince: utcSeconds(24, 0) };
+
+        const summaries = dailySummaries(twoDayReadings, config.tariff, household);
+
+        expect(summaries[0].householdSize).toBe(4); // 2026-07-30, before the change
+        expect(summaries[1].householdSize).toBe(2); // 2026-07-31, on/after the change
+    });
+});
+
+describe('ReportFunction householdContext', () => {
+    test('returns null when no household settings have been saved', () => {
+        expect(householdContext(null, config.tariff)).toBeNull();
+    });
+
+    test('returns null when effectiveSince is not set', () => {
+        expect(householdContext({ householdSize: 2, priorHouseholdSize: 4 }, config.tariff)).toBeNull();
+    });
+
+    test('returns current/prior sizes and the local changed-on date when present', () => {
+        const household = { householdSize: 2, priorHouseholdSize: 4, effectiveSince: utcSeconds(24, 0) };
+        expect(householdContext(household, config.tariff)).toEqual({
+            currentSize: 2, priorSize: 4, changedOn: '2026-07-31'
+        });
     });
 });
 

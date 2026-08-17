@@ -59,8 +59,8 @@ function validAiResponseText(overrides = {}) {
 
 describe('SettingsOptimizerFunction', () => {
     let summarizeBatteryControlHistory, parseOptimizationRecommendation,
-        buildRecommendations, buildOptimizationRecord, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
-        SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler;
+        buildRecommendations, buildOptimizationRecord, householdContext, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
+        SETTINGS_OPTIMIZER_SETTINGS_PREFIX, HOUSEHOLD_SETTINGS_PREFIX, handler;
 
     function findPutCalls() {
         return mockDynamoSend.mock.calls.map(call => call[0]).filter(cmd => cmd.__type === 'Put');
@@ -85,8 +85,8 @@ describe('SettingsOptimizerFunction', () => {
 
         ({
             summarizeBatteryControlHistory, parseOptimizationRecommendation,
-            buildRecommendations, buildOptimizationRecord, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
-            SETTINGS_OPTIMIZER_SETTINGS_PREFIX, handler
+            buildRecommendations, buildOptimizationRecord, householdContext, STATUS_RECORD_PREFIX, BATTERY_SETTINGS_PREFIX,
+            SETTINGS_OPTIMIZER_SETTINGS_PREFIX, HOUSEHOLD_SETTINGS_PREFIX, handler
         } = require('../lambda/SettingsOptimizerFunction/SettingsOptimizerFunction'));
     });
 
@@ -229,6 +229,28 @@ describe('SettingsOptimizerFunction', () => {
             expect(record.Timestamp).toBe(1785400000);
             expect(record.confidence).toBe('low');
             expect(record.applied).toBe(false);
+        });
+    });
+
+    describe('householdContext', () => {
+        test('returns null when no household settings have been saved', () => {
+            expect(householdContext(null, 100000)).toBeNull();
+        });
+
+        test('returns null when effectiveSince is not set', () => {
+            expect(householdContext({ householdSize: 2, priorHouseholdSize: 4 }, 100000)).toBeNull();
+        });
+
+        test('returns current/prior sizes and days since the change', () => {
+            const household = { householdSize: 2, priorHouseholdSize: 4, effectiveSince: 100000 };
+            expect(householdContext(household, 100000 + 3 * 24 * 60 * 60)).toEqual({
+                currentSize: 2, priorSize: 4, daysSinceChange: 3
+            });
+        });
+
+        test('never reports a negative daysSinceChange for a future effectiveSince', () => {
+            const household = { householdSize: 2, priorHouseholdSize: 4, effectiveSince: 100000 };
+            expect(householdContext(household, 100000 - 24 * 60 * 60).daysSinceChange).toBe(0);
         });
     });
 
@@ -503,6 +525,37 @@ describe('SettingsOptimizerFunction', () => {
             const body = JSON.parse(invokeInput.body);
             const promptData = JSON.parse(body.messages[0].content);
             expect(promptData.minSampleSize).toBe(BASE_CONFIG.minSampleSize);
+        });
+
+        test('includes household context in the recommendation prompt when a household setting has been saved', async () => {
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get' && command.input.Key.DeviceSn === `${HOUSEHOLD_SETTINGS_PREFIX}H34ABCDEFG5001`) {
+                    return Promise.resolve({ Item: { householdSize: 2, priorHouseholdSize: 4, effectiveSince: 1000 } });
+                }
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type === 'Query') return Promise.resolve({ Items: [] });
+                return Promise.resolve({});
+            });
+
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            const invokeInput = mockBedrockSend.mock.calls[0][0].input;
+            const body = JSON.parse(invokeInput.body);
+            const promptData = JSON.parse(body.messages[0].content);
+            expect(promptData.household.currentSize).toBe(2);
+            expect(promptData.household.priorSize).toBe(4);
+            expect(promptData.household.daysSinceChange).toBeGreaterThanOrEqual(0);
+        });
+
+        test('omits household from the recommendation prompt when no household setting has been saved', async () => {
+            const result = await handler();
+
+            expect(result.statusCode).toBe(200);
+            const invokeInput = mockBedrockSend.mock.calls[0][0].input;
+            const body = JSON.parse(invokeInput.body);
+            const promptData = JSON.parse(body.messages[0].content);
+            expect(promptData.household).toBeUndefined();
         });
 
         test('failure: a Bedrock error publishes to the alerts topic and rethrows', async () => {

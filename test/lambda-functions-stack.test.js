@@ -226,6 +226,14 @@ describe('LambdaFunctionsStack', () => {
         });
     });
 
+    test('creates a /household-settings API resource with GET and PUT methods', () => {
+        template.hasResourceProperties('AWS::ApiGateway::Resource', { PathPart: 'household-settings' });
+        template.hasResourceProperties('AWS::ApiGateway::Method', {
+            HttpMethod: 'PUT',
+            AuthorizationType: 'COGNITO_USER_POOLS'
+        });
+    });
+
     test('POST /insights (manual assessment trigger) requires Cognito authorization', () => {
         template.hasResourceProperties('AWS::ApiGateway::Method', {
             HttpMethod: 'POST',

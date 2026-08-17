@@ -11,7 +11,9 @@ const {
     validateBatterySettings,
     formatSettingsOptimizationResponse,
     formatSettingsOptimizerSettingsResponse,
-    validateSettingsOptimizerSettings
+    validateSettingsOptimizerSettings,
+    formatHouseholdSettingsResponse,
+    validateHouseholdSettings
 } = require('../lambda/DashboardApiFunction/DashboardApiFunction');
 
 const config = JSON.parse(
@@ -583,5 +585,49 @@ describe('DashboardApiFunction validateSettingsOptimizerSettings', () => {
 
     test('rejects a non-boolean autoApply field', () => {
         expect(validateSettingsOptimizerSettings({ autoApply: 'yes' })).toMatch(/autoApply/);
+    });
+});
+
+describe('DashboardApiFunction formatHouseholdSettingsResponse', () => {
+    test('reports unavailable when nothing has been saved', () => {
+        expect(formatHouseholdSettingsResponse(undefined)).toEqual({ available: false });
+    });
+
+    test('returns the saved values when present', () => {
+        const item = { householdSize: 2, priorHouseholdSize: 4, effectiveSince: 1785600000 };
+        expect(formatHouseholdSettingsResponse(item)).toEqual({
+            available: true, householdSize: 2, priorHouseholdSize: 4, effectiveSince: 1785600000
+        });
+    });
+});
+
+describe('DashboardApiFunction validateHouseholdSettings', () => {
+    test('accepts a valid payload', () => {
+        expect(validateHouseholdSettings({ householdSize: 2, priorHouseholdSize: 4, effectiveSince: 1785600000 })).toBeNull();
+    });
+
+    test('rejects a non-integer householdSize', () => {
+        expect(validateHouseholdSettings({ householdSize: 2.5, priorHouseholdSize: 4, effectiveSince: 1785600000 }))
+            .toMatch(/householdSize/);
+    });
+
+    test('rejects a householdSize below 1', () => {
+        expect(validateHouseholdSettings({ householdSize: 0, priorHouseholdSize: 4, effectiveSince: 1785600000 }))
+            .toMatch(/householdSize/);
+    });
+
+    test('rejects a non-integer priorHouseholdSize', () => {
+        expect(validateHouseholdSettings({ householdSize: 2, priorHouseholdSize: 'four', effectiveSince: 1785600000 }))
+            .toMatch(/priorHouseholdSize/);
+    });
+
+    test('rejects a non-numeric effectiveSince', () => {
+        expect(validateHouseholdSettings({ householdSize: 2, priorHouseholdSize: 4, effectiveSince: 'yesterday' }))
+            .toMatch(/effectiveSince/);
+    });
+
+    test('rejects a zero or negative effectiveSince', () => {
+        expect(validateHouseholdSettings({ householdSize: 2, priorHouseholdSize: 4, effectiveSince: 0 }))
+            .toMatch(/effectiveSince/);
     });
 });

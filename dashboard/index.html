@@ -307,6 +307,54 @@
     </form>
   </section>
 
+  <section class="settings" id="householdSettingsSection">
+    <h2>Household Settings</h2>
+    <p class="auto-apply-note">
+      Records a change in occupant count so the nightly AI narrative, accuracy check, and settings
+      recommendation can compare usage before/after the change instead of assuming it scales with headcount.
+      Doesn't change any control logic directly.
+    </p>
+    <form id="householdSettingsForm">
+      <div class="settings-table-wrap">
+        <table class="settings-table">
+          <thead>
+            <tr>
+              <th scope="col">Setting</th>
+              <th scope="col">What it does</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><label for="householdSize">Current household size</label></th>
+              <td>Number of people currently living in the household.</td>
+              <td class="value-cell">
+                <input type="number" id="householdSize" min="1" max="20" step="1" required>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><label for="priorHouseholdSize">Prior household size</label></th>
+              <td>Number of people living in the household before the change below.</td>
+              <td class="value-cell">
+                <input type="number" id="priorHouseholdSize" min="1" max="20" step="1" required>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row"><label for="householdEffectiveSince">Changed on</label></th>
+              <td>The date the household size above took effect.</td>
+              <td class="value-cell">
+                <input type="date" id="householdEffectiveSince" required>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <button type="submit" id="householdSettingsSaveButton" class="settings-save-button">Save settings</button>
+      <p id="householdSettingsStatus" class="status" hidden></p>
+    </form>
+  </section>
+
 </main>
 </div>
 

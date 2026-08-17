@@ -29,6 +29,11 @@ const SETTINGS_OPTIMIZATION_PREFIX = 'SETTINGS_OPTIMIZATION#';
 // dashboard-editable "Full automation" (autoApply) toggle, same fixed-key-row
 // pattern as BATTERY_SETTINGS_PREFIX above.
 const SETTINGS_OPTIMIZER_SETTINGS_PREFIX = 'SETTINGS_OPTIMIZER_SETTINGS#';
+// Matches ReportFunction/BatteryControlFunction/SettingsOptimizerFunction's
+// HOUSEHOLD_SETTINGS_PREFIX — a household-size change to fold into their AI
+// prompts. Same fixed-key-row pattern as the settings prefixes above, but has
+// no second (AI-driven) writer, so unlike those it carries no sources map.
+const HOUSEHOLD_SETTINGS_PREFIX = 'HOUSEHOLD_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
 
 // Per-field provenance for a dashboard-editable settings row: 'default' when
@@ -80,6 +85,14 @@ exports.handler = async (event) => {
 
     if (event.resource === '/settings-optimizer-settings') {
         return handleGetSettingsOptimizerSettings();
+    }
+
+    if (event.resource === '/household-settings' && event.httpMethod === 'PUT') {
+        return handlePutHouseholdSettings(event);
+    }
+
+    if (event.resource === '/household-settings') {
+        return handleGetHouseholdSettings();
     }
 
     return handleReadings(event);
@@ -452,6 +465,82 @@ function formatBatterySettingsResponse(item) {
     };
 }
 
+// Dashboard-editable household-size context, folded into ReportFunction/
+// BatteryControlFunction/SettingsOptimizerFunction's Bedrock prompts (see
+// each Lambda's householdContext) — same fixed-key settings row pattern as
+// battery-settings, but a plain full-replace with no sources map, since
+// nothing else ever writes this row.
+async function handleGetHouseholdSettings() {
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const result = await docClient.send(new GetCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            Key: { DeviceSn: `${HOUSEHOLD_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP }
+        }));
+        return response(200, formatHouseholdSettingsResponse(result.Item));
+    } catch (err) {
+        logError('Household settings query failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+async function handlePutHouseholdSettings(event) {
+    let body;
+    try {
+        body = JSON.parse(event.body || '{}');
+    } catch {
+        return response(400, { message: 'Request body must be valid JSON' });
+    }
+
+    const validationError = validateHouseholdSettings(body);
+    if (validationError) {
+        return response(400, { message: validationError });
+    }
+
+    try {
+        const deviceSn = process.env.SOLAX_INVERTER_SN;
+        const item = {
+            DeviceSn: `${HOUSEHOLD_SETTINGS_PREFIX}${deviceSn}`,
+            Timestamp: SETTINGS_TIMESTAMP,
+            householdSize: body.householdSize,
+            priorHouseholdSize: body.priorHouseholdSize,
+            effectiveSince: body.effectiveSince
+        };
+
+        await docClient.send(new PutCommand({ TableName: process.env.ENERGY_READINGS_TABLE, Item: item }));
+        logInfo('Household settings updated', item);
+        return response(200, formatHouseholdSettingsResponse(item));
+    } catch (err) {
+        logError('Household settings update failed', { error: err.message });
+        return response(500, { message: 'Internal server error' });
+    }
+}
+
+// 1-20 is a sanity bound (catches fat-finger entry), not a real product limit.
+function isValidHouseholdSize(n) {
+    return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 20;
+}
+
+function validateHouseholdSettings(body) {
+    if (!isValidHouseholdSize(body.householdSize)) return 'householdSize must be a whole number between 1 and 20';
+    if (!isValidHouseholdSize(body.priorHouseholdSize)) return 'priorHouseholdSize must be a whole number between 1 and 20';
+    if (typeof body.effectiveSince !== 'number' || !Number.isFinite(body.effectiveSince) || body.effectiveSince <= 0) {
+        return 'effectiveSince must be a valid Unix timestamp (seconds)';
+    }
+    return null;
+}
+
+function formatHouseholdSettingsResponse(item) {
+    if (!item) return { available: false };
+
+    return {
+        available: true,
+        householdSize: item.householdSize,
+        priorHouseholdSize: item.priorHouseholdSize,
+        effectiveSince: item.effectiveSince
+    };
+}
+
 async function queryLatestSentinelRecord(reportDeviceSn) {
     const result = await docClient.send(new QueryCommand({
         TableName: process.env.ENERGY_READINGS_TABLE,
@@ -635,3 +724,5 @@ module.exports.validateBatterySettings = validateBatterySettings;
 module.exports.formatSettingsOptimizationResponse = formatSettingsOptimizationResponse;
 module.exports.formatSettingsOptimizerSettingsResponse = formatSettingsOptimizerSettingsResponse;
 module.exports.validateSettingsOptimizerSettings = validateSettingsOptimizerSettings;
+module.exports.formatHouseholdSettingsResponse = formatHouseholdSettingsResponse;
+module.exports.validateHouseholdSettings = validateHouseholdSettings;

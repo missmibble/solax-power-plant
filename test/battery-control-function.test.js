@@ -154,7 +154,7 @@ function dynamoImplWithStatusRecord(record) {
 describe('BatteryControlFunction', () => {
     let classifyForecast, buildSelfUseModeRequest, buildBatteryStatusRecord, resolveEffectiveSettings,
         chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, buildSurplusDischargePlan,
-        BATTERY_STATUS_RECORD_PREFIX, handler;
+        householdContext, BATTERY_STATUS_RECORD_PREFIX, HOUSEHOLD_SETTINGS_PREFIX, handler;
 
     beforeEach(() => {
         jest.resetModules();
@@ -185,7 +185,7 @@ describe('BatteryControlFunction', () => {
         ({
             classifyForecast, buildSelfUseModeRequest, buildBatteryStatusRecord, resolveEffectiveSettings,
             chargeTargetForClassification, summarizeUsage, parseAccuracyAssessment, buildSurplusDischargePlan,
-            BATTERY_STATUS_RECORD_PREFIX, handler
+            householdContext, BATTERY_STATUS_RECORD_PREFIX, HOUSEHOLD_SETTINGS_PREFIX, handler
         } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
     });
 
@@ -413,6 +413,24 @@ describe('BatteryControlFunction', () => {
 
         test('returns null when the text has no JSON object at all', () => {
             expect(parseAccuracyAssessment('not json')).toBeNull();
+        });
+    });
+
+    describe('householdContext', () => {
+        test('returns null when no household settings have been saved', () => {
+            expect(householdContext(null, { timezone: 'UTC' })).toBeNull();
+        });
+
+        test('returns null when effectiveSince is not set', () => {
+            expect(householdContext({ householdSize: 2, priorHouseholdSize: 4 }, { timezone: 'UTC' })).toBeNull();
+        });
+
+        test('returns current/prior sizes and the local changed-on date when present', () => {
+            const household = { householdSize: 2, priorHouseholdSize: 4, effectiveSince: 1785600000 };
+            const context = householdContext(household, { timezone: 'UTC' });
+            expect(context).toEqual({
+                currentSize: 2, priorSize: 4, changedOn: localDateString(1785600000, 'UTC')
+            });
         });
     });
 
@@ -855,6 +873,81 @@ describe('BatteryControlFunction', () => {
                 { label: 'night-ev-charge', rate: 0.08 },
                 { label: 'peak-evening', rate: 0.41756 }
             ]);
+        });
+
+        test('includes household context in the accuracy prompt when a household setting has been saved', async () => {
+            process.env.BEDROCK_MODEL_ID = 'anthropic.claude-3-5-haiku-20241022-v1:0';
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') {
+                    if (command.input.Key.DeviceSn === `${HOUSEHOLD_SETTINGS_PREFIX}H34ABCDEFG5001`) {
+                        return Promise.resolve({ Item: { householdSize: 2, priorHouseholdSize: 4, effectiveSince: 500 } });
+                    }
+                    return Promise.resolve({});
+                }
+                if (command.__type === 'Query') {
+                    if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                        return Promise.resolve({
+                            Items: [{ Timestamp: 1000, classification: 'sunny', reasoning: 'clear', chargeUpperSoc: 40, applied: true }]
+                        });
+                    }
+                    return Promise.resolve({
+                        Items: [
+                            { totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5, batterySOC: 80 },
+                            { totalYield: 108, totalImportEnergy: 55, totalExportEnergy: 6, batterySOC: 15 }
+                        ]
+                    });
+                }
+                return Promise.resolve({});
+            });
+            ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
+
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(
+                '{"accurate": true, "assessment": "Fine.", "usageShouldInfluence": false, "usageNote": ""}'
+            ));
+
+            await handler();
+
+            const invokeInput = mockBedrockSend.mock.calls[0][0].input;
+            const body = JSON.parse(invokeInput.body);
+            const promptData = JSON.parse(body.messages[0].content);
+            expect(promptData.household).toEqual({
+                currentSize: 2, priorSize: 4, changedOn: localDateString(500, 'UTC')
+            });
+        });
+
+        test('omits household from the prompt when no household setting has been saved', async () => {
+            process.env.BEDROCK_MODEL_ID = 'anthropic.claude-3-5-haiku-20241022-v1:0';
+            mockDynamoSend.mockImplementation(command => {
+                if (command.__type === 'Get') return Promise.resolve({});
+                if (command.__type === 'Query') {
+                    if (command.input.ExpressionAttributeValues[':sn'].startsWith('BATTERY_CONTROL#')) {
+                        return Promise.resolve({
+                            Items: [{ Timestamp: 1000, classification: 'sunny', reasoning: 'clear', chargeUpperSoc: 40, applied: true }]
+                        });
+                    }
+                    return Promise.resolve({
+                        Items: [
+                            { totalYield: 100, totalImportEnergy: 50, totalExportEnergy: 5, batterySOC: 80 },
+                            { totalYield: 108, totalImportEnergy: 55, totalExportEnergy: 6, batterySOC: 15 }
+                        ]
+                    });
+                }
+                return Promise.resolve({});
+            });
+            ({ handler } = require('../lambda/BatteryControlFunction/BatteryControlFunction'));
+
+            global.fetch.mockResolvedValue({ json: async () => openMeteoHourlyResponse({}) });
+            mockBedrockSend.mockResolvedValue(bedrockTextResponse(
+                '{"accurate": true, "assessment": "Fine.", "usageShouldInfluence": false, "usageNote": ""}'
+            ));
+
+            await handler();
+
+            const invokeInput = mockBedrockSend.mock.calls[0][0].input;
+            const body = JSON.parse(invokeInput.body);
+            const promptData = JSON.parse(body.messages[0].content);
+            expect(promptData.household).toBeUndefined();
         });
 
         test('omits previousAssessment when no model is configured', async () => {

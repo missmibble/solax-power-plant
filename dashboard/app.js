@@ -92,7 +92,13 @@ const els = {
   settingsOptimizerAutoApply: document.getElementById('settingsOptimizerAutoApply'),
   settingsOptimizerAutoApplyState: document.getElementById('settingsOptimizerAutoApplyState'),
   settingsOptimizerSettingsStatus: document.getElementById('settingsOptimizerSettingsStatus'),
-  settingsOptimizerSettingsSaveButton: document.getElementById('settingsOptimizerSettingsSaveButton')
+  settingsOptimizerSettingsSaveButton: document.getElementById('settingsOptimizerSettingsSaveButton'),
+  householdSettingsForm: document.getElementById('householdSettingsForm'),
+  householdSize: document.getElementById('householdSize'),
+  priorHouseholdSize: document.getElementById('priorHouseholdSize'),
+  householdEffectiveSince: document.getElementById('householdEffectiveSince'),
+  householdSettingsStatus: document.getElementById('householdSettingsStatus'),
+  householdSettingsSaveButton: document.getElementById('householdSettingsSaveButton')
 };
 
 let chart;
@@ -189,6 +195,7 @@ function showDashboard() {
   loadBatterySettings();
   loadSettingsOptimization();
   loadSettingsOptimizerSettings();
+  loadHouseholdSettings();
 }
 
 els.loginForm.addEventListener('submit', async (event) => {
@@ -696,6 +703,12 @@ const SETTINGS_OPTIMIZER_SETTINGS_FIELD_LABELS = {
   autoApply: 'Full automation'
 };
 
+const HOUSEHOLD_SETTINGS_FIELD_LABELS = {
+  householdSize: 'Current household size',
+  priorHouseholdSize: 'Prior household size',
+  effectiveSince: 'Changed on'
+};
+
 // Translates DashboardApiFunction's raw validate*/error messages (field
 // names, HTTP status codes) into something a non-technical reader can act
 // on. Falls back to the original message for anything unrecognized, rather
@@ -715,6 +728,16 @@ function humanizeSettingsError(message, fieldLabels) {
   if (boolMatch) {
     const label = fieldLabels[boolMatch[1]] || boolMatch[1];
     return `There was a problem with the "${label}" toggle — please reload the page and try again.`;
+  }
+
+  const wholeNumberMatch = message.match(/^(\w+) must be a whole number between 1 and 20$/);
+  if (wholeNumberMatch) {
+    const label = fieldLabels[wholeNumberMatch[1]] || wholeNumberMatch[1];
+    return `"${label}" must be a whole number between 1 and 20.`;
+  }
+
+  if (message === 'effectiveSince must be a valid Unix timestamp (seconds)') {
+    return `"${fieldLabels.effectiveSince || 'Changed on'}" must be a valid date.`;
   }
 
   if (message === 'Request body must be valid JSON') {
@@ -860,6 +883,75 @@ els.batterySettingsForm.addEventListener('submit', async (event) => {
     setBatterySettingsStatus('Saved — takes effect on the next nightly run.');
   } catch (err) {
     setBatterySettingsStatus(`Couldn't save settings: ${humanizeSettingsError(err.message, BATTERY_SETTINGS_FIELD_LABELS)}`);
+  }
+});
+
+// ─── Household settings (occupant-count context for the AI prompts) ────────
+
+// Local calendar date <-> epoch seconds, same local-components approach as
+// formatAppliesToDate above (not new Date(dateStr), which parses date-only
+// ISO strings as UTC midnight and can shift a day once displayed locally).
+function dateInputToEpochSeconds(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return Math.floor(new Date(year, month - 1, day).getTime() / 1000);
+}
+
+function epochSecondsToDateInput(epochSeconds) {
+  const d = new Date(epochSeconds * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+async function loadHouseholdSettings() {
+  try {
+    const res = await authorizedFetch('household-settings');
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+
+    const data = await res.json();
+    if (data.available) {
+      els.householdSize.value = data.householdSize;
+      els.priorHouseholdSize.value = data.priorHouseholdSize;
+      els.householdEffectiveSince.value = epochSecondsToDateInput(data.effectiveSince);
+    }
+    setHouseholdSettingsStatus('');
+  } catch (err) {
+    setHouseholdSettingsStatus(`Couldn't load settings: ${humanizeSettingsError(err.message, HOUSEHOLD_SETTINGS_FIELD_LABELS)}`);
+  }
+}
+
+function setHouseholdSettingsStatus(message) {
+  els.householdSettingsStatus.textContent = message;
+  els.householdSettingsStatus.hidden = !message;
+}
+
+els.householdSettingsForm.addEventListener('input', () => {
+  setSaveButtonDirty(els.householdSettingsSaveButton, true);
+});
+
+els.householdSettingsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setHouseholdSettingsStatus('Saving…');
+
+  try {
+    const res = await authorizedFetch('household-settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        householdSize: Number(els.householdSize.value),
+        priorHouseholdSize: Number(els.priorHouseholdSize.value),
+        effectiveSince: dateInputToEpochSeconds(els.householdEffectiveSince.value)
+      })
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Request failed: ${res.status}`);
+    }
+
+    setSaveButtonDirty(els.householdSettingsSaveButton, false);
+    setHouseholdSettingsStatus('Saved.');
+  } catch (err) {
+    setHouseholdSettingsStatus(`Couldn't save settings: ${humanizeSettingsError(err.message, HOUSEHOLD_SETTINGS_FIELD_LABELS)}`);
   }
 });
 

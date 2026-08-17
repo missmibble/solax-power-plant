@@ -23,6 +23,10 @@ const SETTINGS_OPTIMIZER_SETTINGS_PREFIX = 'SETTINGS_OPTIMIZER_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0;
 // This function's own nightly recommendation record.
 const STATUS_RECORD_PREFIX = 'SETTINGS_OPTIMIZATION#';
+// Same dashboard-editable row ReportFunction/BatteryControlFunction read —
+// duplicated per this app's independent-deployment-package convention. Read
+// the same way as the other two prefixes above, via loadOverride.
+const HOUSEHOLD_SETTINGS_PREFIX = 'HOUSEHOLD_SETTINGS#';
 
 const SYSTEM_PROMPT = `You are reviewing a week of operational history for a home solar + battery system, \
 to recommend whether three control-tuning defaults should be adjusted:
@@ -51,7 +55,14 @@ sample size means the change can never actually be applied no matter what number
 value there is simply discarded. Your reasoning text must match what you actually return: do not describe or \
 suggest a specific new percentage for a setting you returned null for, since that number will never take \
 effect and only misleads whoever reads the reasoning. For those settings, explain that you're holding at the \
-current value for lack of data instead.`;
+current value for lack of data instead.
+
+If a "household" field is present, the occupant count changed from "priorSize" to "currentSize" people \
+"daysSinceChange" days ago — treat this as a real, independent explanation for why recent nights' usage may \
+differ from older ones in the sample. Do not assume usage scales proportionally with headcount. If \
+daysSinceChange is small relative to minSampleSize, favor holding the current value (recommend null) rather \
+than reacting to a handful of post-change nights — there isn't yet enough evidence at the new household size \
+to trust a change, even if the overall sample size elsewhere looks sufficient.`;
 
 async function queryRecentRecords(prefix, deviceSn, sinceSeconds) {
     const items = [];
@@ -104,6 +115,20 @@ function summarizeBatteryControlHistory(records) {
     return byClassification;
 }
 
+// Returns null when no household-size change has been saved (fully inert).
+// No tariff/timezone is plumbed into this Lambda's env (unlike ReportFunction/
+// BatteryControlFunction), and daysSinceChange is more directly useful here
+// anyway — it says how much of the lookbackDays window falls under the new
+// household size, which is what this function's aggregation actually cares about.
+function householdContext(household, nowSeconds) {
+    if (!household || household.effectiveSince == null) return null;
+    return {
+        currentSize: household.householdSize,
+        priorSize: household.priorHouseholdSize,
+        daysSinceChange: Math.max(0, Math.floor((nowSeconds - household.effectiveSince) / (24 * 60 * 60)))
+    };
+}
+
 function parseOptimizationRecommendation(text) {
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
@@ -121,8 +146,11 @@ function parseOptimizationRecommendation(text) {
     };
 }
 
-async function getRecommendation(modelId, currentValues, batterySummary, minSampleSize) {
-    const prompt = JSON.stringify({ currentValues, batteryControlHistory: batterySummary, minSampleSize });
+async function getRecommendation(modelId, currentValues, batterySummary, minSampleSize, household) {
+    const prompt = JSON.stringify({
+        currentValues, batteryControlHistory: batterySummary, minSampleSize,
+        ...(household ? { household } : {})
+    });
 
     const response = await bedrockClient.send(new InvokeModelCommand({
         modelId,
@@ -260,9 +288,10 @@ exports.handler = async () => {
         const nowSeconds = Math.floor(Date.now() / 1000);
         const sinceSeconds = nowSeconds - config.lookbackDays * 24 * 60 * 60;
 
-        const [batteryOverride, optimizerSettingsOverride, batteryRecords] = await Promise.all([
+        const [batteryOverride, optimizerSettingsOverride, household, batteryRecords] = await Promise.all([
             loadOverride(BATTERY_SETTINGS_PREFIX, deviceSn),
             loadOverride(SETTINGS_OPTIMIZER_SETTINGS_PREFIX, deviceSn),
+            loadOverride(HOUSEHOLD_SETTINGS_PREFIX, deviceSn),
             queryRecentRecords(BATTERY_STATUS_PREFIX, deviceSn, sinceSeconds)
         ]);
 
@@ -286,7 +315,9 @@ exports.handler = async () => {
         // (but successfully returned) response still degrades gracefully to
         // "no recommendation" via parseOptimizationRecommendation, same as
         // parseAiResponse/parseAccuracyAssessment elsewhere.
-        const aiRecommendation = await getRecommendation(modelId, currentValues, batterySummary, config.minSampleSize);
+        const aiRecommendation = await getRecommendation(
+            modelId, currentValues, batterySummary, config.minSampleSize, householdContext(household, nowSeconds)
+        );
 
         const recommendations = buildRecommendations({
             currentValues, batterySummary, aiRecommendation,
@@ -325,6 +356,8 @@ module.exports.summarizeBatteryControlHistory = summarizeBatteryControlHistory;
 module.exports.parseOptimizationRecommendation = parseOptimizationRecommendation;
 module.exports.buildRecommendations = buildRecommendations;
 module.exports.buildOptimizationRecord = buildOptimizationRecord;
+module.exports.householdContext = householdContext;
 module.exports.STATUS_RECORD_PREFIX = STATUS_RECORD_PREFIX;
 module.exports.BATTERY_SETTINGS_PREFIX = BATTERY_SETTINGS_PREFIX;
 module.exports.SETTINGS_OPTIMIZER_SETTINGS_PREFIX = SETTINGS_OPTIMIZER_SETTINGS_PREFIX;
+module.exports.HOUSEHOLD_SETTINGS_PREFIX = HOUSEHOLD_SETTINGS_PREFIX;

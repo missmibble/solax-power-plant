@@ -30,6 +30,12 @@ const BATTERY_STATUS_RECORD_PREFIX = 'BATTERY_CONTROL#';
 const BATTERY_SETTINGS_PREFIX = 'BATTERY_CONTROL_SETTINGS#';
 const SETTINGS_TIMESTAMP = 0; // fixed sort key — one settings row per inverter, not time-series
 
+// Same dashboard-editable row ReportFunction reads (HOUSEHOLD_SETTINGS_PREFIX
+// there) — duplicated per the independent-deployment-package convention (see
+// SETTINGS_OPTIMIZER_LABELS in ReportFunction.js). No row saved yet is fully
+// inert: assessPreviousDecision's prompt is unchanged from before this existed.
+const HOUSEHOLD_SETTINGS_PREFIX = 'HOUSEHOLD_SETTINGS#';
+
 const ACCURACY_SYSTEM_PROMPT = `You are reviewing a home battery charge-control decision made yesterday \
 evening for a solar + battery system. The household also owns an electric vehicle that is often plugged in \
 to charge overnight, in the same 00:00-06:00 night-ev-charge window the battery itself grid-charges in — EV \
@@ -64,7 +70,12 @@ export lower, only when the dollar comparison actually favors a lower target.
 account for household load, independent of tomorrow's forecast.
 "usageNote": 1 sentence on what about today's usage drove that judgement, citing the specific window (e.g. \
 "import during shoulder-morning suggests the battery ran flat before solar ramped up") — empty string if \
-usageShouldInfluence is false.`;
+usageShouldInfluence is false.
+
+If a "household" field is present, the occupant count changed on "changedOn" from "priorSize" to \
+"currentSize" people — a legitimate independent explanation for today's usage differing from the recent \
+pattern. Don't call yesterday's target inaccurate solely because usage came in lower/higher than a typical \
+night if the household change plausibly explains the difference.`;
 
 let cachedCredentials = null; // reused across warm invocations, same pattern as PollerFunction
 
@@ -222,6 +233,31 @@ async function loadSettingsOverride(deviceSn) {
     }
 }
 
+// Returns null when no household-size change has been saved (fully inert).
+// Both counts are carried, not just the current one, so the AI can compare
+// actual before/after usage instead of assuming it scales with headcount.
+function householdContext(household, tariff) {
+    if (!household || household.effectiveSince == null) return null;
+    return {
+        currentSize: household.householdSize,
+        priorSize: household.priorHouseholdSize,
+        changedOn: localDateString(household.effectiveSince, tariff.timezone)
+    };
+}
+
+async function loadHouseholdSettings(deviceSn) {
+    try {
+        const result = await docClient.send(new GetCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            Key: { DeviceSn: `${HOUSEHOLD_SETTINGS_PREFIX}${deviceSn}`, Timestamp: SETTINGS_TIMESTAMP }
+        }));
+        return result.Item || null;
+    } catch (err) {
+        logError('Failed to load household settings', { error: err.message });
+        return null;
+    }
+}
+
 function resolveEffectiveSettings(batteryControlConfig, override) {
     return {
         enabled: override?.enabled ?? true,
@@ -250,7 +286,7 @@ function chargeTargetForClassification(classification, effective) {
 // configured, a Bedrock error, an unparsable response, or simply not enough
 // history yet all just mean tonight's record has no previousAssessment field,
 // never a failed run.
-async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
+async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp, household) {
     const modelId = process.env.BEDROCK_MODEL_ID;
     if (!modelId) return null;
 
@@ -262,6 +298,7 @@ async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
         if (readings.length < 2) return null;
 
         const usageSummary = summarizeUsage(readings, tariff);
+        const context = householdContext(household, tariff);
 
         const prompt = JSON.stringify({
             yesterdaysDecision: {
@@ -275,7 +312,8 @@ async function assessPreviousDecision(deviceSn, tariff, beforeTimestamp) {
                 feedInRate: tariff.feedInRate,
                 importRates: (tariff.importRates || []).map(w => ({ label: w.label, rate: w.rate }))
             },
-            currency: tariff.currency
+            currency: tariff.currency,
+            ...(context ? { household: context } : {})
         });
 
         const response = await bedrockClient.send(new InvokeModelCommand({
@@ -442,7 +480,8 @@ async function handleDecide(deviceSn, nowSeconds) {
     const settingsOverride = await loadSettingsOverride(deviceSn);
     const effective = resolveEffectiveSettings(batteryControlConfig, settingsOverride);
     const dryRun = effective.dryRun;
-    const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds);
+    const household = await loadHouseholdSettings(deviceSn);
+    const previousAssessment = await assessPreviousDecision(deviceSn, tariff, nowSeconds, household);
 
     let classification;
     let reasoning;
@@ -614,6 +653,8 @@ module.exports.chargeTargetForClassification = chargeTargetForClassification;
 module.exports.summarizeUsage = summarizeUsage;
 module.exports.parseAccuracyAssessment = parseAccuracyAssessment;
 module.exports.buildSurplusDischargePlan = buildSurplusDischargePlan;
+module.exports.householdContext = householdContext;
 module.exports.BATTERY_STATUS_RECORD_PREFIX = BATTERY_STATUS_RECORD_PREFIX;
 module.exports.BATTERY_SETTINGS_PREFIX = BATTERY_SETTINGS_PREFIX;
 module.exports.SETTINGS_TIMESTAMP = SETTINGS_TIMESTAMP;
+module.exports.HOUSEHOLD_SETTINGS_PREFIX = HOUSEHOLD_SETTINGS_PREFIX;

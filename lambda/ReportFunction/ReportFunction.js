@@ -1,7 +1,7 @@
 'use strict';
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, QueryCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, QueryCommand, PutCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const {
@@ -38,6 +38,13 @@ const REPORT_RECORD_PREFIX = 'REPORT#';
 const BATTERY_STATUS_RECORD_PREFIX = 'BATTERY_CONTROL#';
 const SETTINGS_OPTIMIZATION_RECORD_PREFIX = 'SETTINGS_OPTIMIZATION#';
 
+// Dashboard-editable, single fixed-key row (same pattern as
+// BATTERY_CONTROL_SETTINGS#) — a household-size change to fold into the AI
+// history context (see householdContext below). No row saved yet is fully
+// inert: dailySummaries/getAiInsights behave exactly as before this existed.
+const HOUSEHOLD_SETTINGS_PREFIX = 'HOUSEHOLD_SETTINGS#';
+const HOUSEHOLD_SETTINGS_TIMESTAMP = 0; // fixed sort key — one row per inverter, not time-series
+
 // The nightly sequence this digest is folding together runs decide (~21:00)
 // -> SettingsOptimizer (~22:00) -> exitDischarge (~23:55, conditional) ->
 // this report (~02:00 next day) — roughly a 5h gap from the first decision
@@ -70,7 +77,13 @@ existing recommendation still makes sense in that context.
 "anomalies": notable deviations from the recent pattern (empty array if none) — e.g. an unusual drop in \
 PV yield, an import spike outside the normal pattern, or battery behaviour that differs from recent days. \
 Do not restate ordinary day-to-day variation as an anomaly, including normal night-to-night differences in \
-EV charging.`;
+EV charging.
+
+If a "household" field is present, the occupant count changed on "changedOn" from "priorSize" to \
+"currentSize" people, and each entry in recentDays is tagged with the size in effect that day — use this to \
+explicitly compare average usage before vs. after that date and state whether usage actually decreased and \
+by roughly how much. Do not assume usage scales proportionally with headcount; report what the data shows, \
+including if it shows little or no change.`;
 
 // Battery charge/discharge/SOC fields are only present when PollerFunction
 // successfully attached them (it discovers the battery device automatically —
@@ -99,7 +112,8 @@ exports.handler = async (event) => {
         }
 
         const assessment = assessUsage(readings, tariff);
-        const aiInsights = await getAiInsights(assessment, tariff, deviceSn, endSeconds);
+        const household = await loadHouseholdSettings(deviceSn);
+        const aiInsights = await getAiInsights(assessment, tariff, deviceSn, endSeconds, household);
         const recommendationText = recommendation(assessment, tariff);
 
         const [batteryControlRecord, settingsOptimizationRecord] = await Promise.all([
@@ -175,6 +189,22 @@ async function queryLatestSentinelRecord(sentinelDeviceSn) {
     return result.Items?.[0] || null;
 }
 
+// Same fixed-key-row lookup as BatteryControlFunction's loadSettingsOverride
+// — never fails the report, a missing row just means dailySummaries/
+// getAiInsights run exactly as they did before this setting existed.
+async function loadHouseholdSettings(deviceSn) {
+    try {
+        const result = await docClient.send(new GetCommand({
+            TableName: process.env.ENERGY_READINGS_TABLE,
+            Key: { DeviceSn: `${HOUSEHOLD_SETTINGS_PREFIX}${deviceSn}`, Timestamp: HOUSEHOLD_SETTINGS_TIMESTAMP }
+        }));
+        return result.Item || null;
+    } catch (err) {
+        logError('Failed to load household settings', { error: err.message });
+        return null;
+    }
+}
+
 // A missing or stale record degrades the digest section gracefully (see
 // formatBatteryControlSummary/formatSettingsOptimizerSummary) rather than
 // reporting a genuinely old decision as if it were tonight's.
@@ -245,10 +275,26 @@ function batterySummary(readings, tariff) {
     };
 }
 
+// Returns null when no household-size change has been saved (fully inert —
+// dailySummaries/getAiInsights behave exactly as before this existed). Both
+// counts are carried, not just the current one, so the AI can compare actual
+// before/after usage instead of assuming it scales with headcount.
+function householdContext(household, tariff) {
+    if (!household || household.effectiveSince == null) return null;
+    return {
+        currentSize: household.householdSize,
+        priorSize: household.priorHouseholdSize,
+        changedOn: localDateString(household.effectiveSince, tariff.timezone)
+    };
+}
+
 // Groups readings into calendar-day PV yield/import/export deltas (local time,
 // per tariff.timezone) as compact context for the AI insights prompt — sending
 // day totals instead of the raw 5-minute time series keeps the prompt small.
-function dailySummaries(readings, tariff) {
+// household is optional — a soft blend, not a hard clip: days before and after
+// a household-size change both stay in the window, each tagged with the size
+// in effect that day, so the AI can compare the two rather than one being cut.
+function dailySummaries(readings, tariff, household) {
     const byDate = new Map();
 
     for (let i = 1; i < readings.length; i++) {
@@ -266,34 +312,42 @@ function dailySummaries(readings, tariff) {
         byDate.set(date, day);
     }
 
+    const context = householdContext(household, tariff);
+
     return [...byDate.values()]
         .sort((a, b) => a.date.localeCompare(b.date))
-        .map(d => ({
-            date: d.date,
-            pvYieldKwh: round2(d.pvYieldKwh),
-            importKwh: round2(d.importKwh),
-            exportKwh: round2(d.exportKwh)
-        }));
+        .map(d => {
+            const day = {
+                date: d.date,
+                pvYieldKwh: round2(d.pvYieldKwh),
+                importKwh: round2(d.importKwh),
+                exportKwh: round2(d.exportKwh)
+            };
+            if (context) day.householdSize = d.date >= context.changedOn ? context.currentSize : context.priorSize;
+            return day;
+        });
 }
 
 // AI narrative + pattern-based anomaly flags, layered on top of (not replacing)
 // the deterministic recommendation() heuristic above. Never fails the report:
 // a missing model config, a Bedrock error, or an unparsable response all just
 // mean the report goes out without this section.
-async function getAiInsights(assessment, tariff, deviceSn, endSeconds) {
+async function getAiInsights(assessment, tariff, deviceSn, endSeconds, household) {
     const modelId = process.env.BEDROCK_MODEL_ID;
     if (!modelId) return null;
 
     try {
         const historyStart = endSeconds - AI_HISTORY_LOOKBACK_DAYS * 24 * 60 * 60;
         const historyReadings = await queryReadings(deviceSn, historyStart, endSeconds);
-        const recentDays = dailySummaries(historyReadings, tariff);
+        const recentDays = dailySummaries(historyReadings, tariff, household);
+        const context = householdContext(household, tariff);
 
         const prompt = JSON.stringify({
             today: assessment,
             recentDays,
             feedInRate: tariff.feedInRate,
-            currency: tariff.currency
+            currency: tariff.currency,
+            ...(context ? { household: context } : {})
         });
 
         const response = await bedrockClient.send(new InvokeModelCommand({
@@ -486,6 +540,7 @@ module.exports.formatReport = formatReport;
 module.exports.formatBatteryControlSummary = formatBatteryControlSummary;
 module.exports.formatSettingsOptimizerSummary = formatSettingsOptimizerSummary;
 module.exports.dailySummaries = dailySummaries;
+module.exports.householdContext = householdContext;
 module.exports.parseAiResponse = parseAiResponse;
 module.exports.getAiInsights = getAiInsights;
 module.exports.recommendation = recommendation;
@@ -495,3 +550,4 @@ module.exports.REPORT_RECORD_PREFIX = REPORT_RECORD_PREFIX;
 module.exports.BATTERY_STATUS_RECORD_PREFIX = BATTERY_STATUS_RECORD_PREFIX;
 module.exports.SETTINGS_OPTIMIZATION_RECORD_PREFIX = SETTINGS_OPTIMIZATION_RECORD_PREFIX;
 module.exports.DIGEST_RECORD_MAX_AGE_SECONDS = DIGEST_RECORD_MAX_AGE_SECONDS;
+module.exports.HOUSEHOLD_SETTINGS_PREFIX = HOUSEHOLD_SETTINGS_PREFIX;
