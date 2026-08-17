@@ -61,7 +61,7 @@ describe('DashboardStack', () => {
         });
     });
 
-    test('routes the "readings", "insights", "battery-status", "battery-settings", "settings-optimization", and "settings-optimizer-settings" path patterns to the API origin', () => {
+    test('routes the "readings", "insights", "battery-status", "battery-settings", "settings-optimization", "settings-optimizer-settings", and "household-settings" path patterns to the API origin', () => {
         template.hasResourceProperties('AWS::CloudFront::Distribution', {
             DistributionConfig: Match.objectLike({
                 CacheBehaviors: Match.arrayWith([
@@ -70,7 +70,8 @@ describe('DashboardStack', () => {
                     Match.objectLike({ PathPattern: 'battery-status' }),
                     Match.objectLike({ PathPattern: 'battery-settings' }),
                     Match.objectLike({ PathPattern: 'settings-optimization' }),
-                    Match.objectLike({ PathPattern: 'settings-optimizer-settings' })
+                    Match.objectLike({ PathPattern: 'settings-optimizer-settings' }),
+                    Match.objectLike({ PathPattern: 'household-settings' })
                 ])
             })
         });
@@ -82,7 +83,8 @@ describe('DashboardStack', () => {
         ['insights', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])],
         ['battery-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])],
         ['settings-optimization', Match.exact(['GET', 'HEAD'])],
-        ['settings-optimizer-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])]
+        ['settings-optimizer-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])],
+        ['household-settings', Match.arrayWith(['GET', 'HEAD', 'PUT', 'POST'])]
     ])('CloudFront behavior for "%s" allows the expected methods', (pathPattern, allowedMethodsMatcher) => {
         template.hasResourceProperties('AWS::CloudFront::Distribution', {
             DistributionConfig: Match.objectLike({
